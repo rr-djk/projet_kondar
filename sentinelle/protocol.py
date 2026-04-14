@@ -87,10 +87,14 @@ def from_json(data: str) -> AcousticEvent:
             f"Invalid severity: {obj['severity']!r}. Must be one of {_VALID_SEVERITIES}"
         )
 
-    # Validate ts is an integer
-    if not isinstance(obj["ts"], int):
+    # Validate ts is an integer (bool is a subclass of int — reject explicitly)
+    if not isinstance(obj["ts"], int) or isinstance(obj["ts"], bool):
         raise InvalidProtocolMessage(
             f"Invalid ts: {obj['ts']!r}. Must be an integer"
+        )
+    if obj["ts"] <= 0:
+        raise InvalidProtocolMessage(
+            f"Invalid ts: {obj['ts']!r}. Must be a positive epoch timestamp (ms)"
         )
 
     return AcousticEvent(

@@ -102,5 +102,5 @@ class AppState:
 
         if event == Event.PATH_BLOCKED:
             self.path_blocked = True
-        elif event in (Event.PATH_FOUND, Event.RESUME):
+        elif event in (Event.PATH_FOUND, Event.RESUME, Event.DISMISS):
             self.path_blocked = False
