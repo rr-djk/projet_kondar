@@ -73,20 +73,35 @@ indépendants qui tournent en parallèle, réunis dans une interface unifiée.
 ```
 sentinelle/
 ├── config.py              # Constantes globales
+├── protocol.py            # Schéma IPC partagé Pi/laptop (AcousticEvent, to_json, from_json)
+├── state.py               # FSM AppState — enum + transition(event)
 ├── acoustic/
-│   ├── capture.py         # sounddevice callback → queue interne
-│   ├── analyzer.py        # FFT + baseline + anomaly (fonctions pures)
+│   ├── capture.py         # Adapter sounddevice → queue interne
+│   ├── analyzer.py        # Fonctions pures : fft, detect_anomaly(spectrum, baseline)
+│   ├── baseline.py        # BaselineStore — état mutable isolé (compute + sanity check)
 │   └── server.py          # asyncio WebSocket server (port 8765)
 ├── visual/
 │   ├── gcode_parser.py    # parse G0/G1 → List[Segment]
 │   ├── obstacle.py        # HSV detection → BoundingBox | None
-│   ├── planner.py         # A* grille 50×50 → List[Point] | None
-│   └── simulator.py       # pygame loop + WebSocket queue consumer
-└── main.py                # Entry point laptop
+│   ├── planner.py         # A* grille 50×50 → List[Point] | None (timeout 150ms)
+│   └── simulator.py       # pygame loop — orchestration UI uniquement
+├── ipc/
+│   └── ws_client.py       # AcousticLink : thread daemon + queue.Queue (reconnect backoff)
+├── main_pi.py             # Entry point Pi
+├── main_laptop.py         # Entry point laptop
+└── tests/
+    ├── test_analyzer.py
+    ├── test_gcode_parser.py
+    ├── test_planner.py
+    ├── test_obstacle.py
+    ├── test_protocol.py   # round-trip JSON, schéma contractuel
+    └── test_state.py      # transitions FSM
 ```
 
-**Pi :** `python acoustic/server.py`
-**Laptop :** `python main.py`
+**Pi :** `python main_pi.py`
+**Laptop :** `python main_laptop.py demo.nc [--camera N]`
+
+**Principe :** `analyzer.py` et `planner.py` sont des fonctions pures sans état. L'état mutable vit dans `baseline.py` et `state.py`. Les adapters I/O (`capture.py`, `obstacle.py`, `ws_client.py`) sont les seuls à parler au hardware.
 
 ---
 
@@ -99,12 +114,15 @@ AUDIO_SR = 44100            # Sample rate audio
 FFT_WINDOW_MS = 512         # Fenêtre FFT en ms
 FFT_OVERLAP = 0.5           # Overlap 50%
 AUDIO_BLOCKSIZE = 4096      # Blocs sounddevice (~93ms)
-BASELINE_DURATION_S = 10    # Durée capture baseline
-ANOMALY_SIGMA = 2.0         # Seuil détection anomalie
+BASELINE_DURATION_S = 10      # Durée capture baseline
+ANOMALY_WARN_SIGMA = 2.0      # Seuil warn (alerte jaune)
+ANOMALY_CRITICAL_SIGMA = 3.0  # Seuil critical (overlay rouge + pause)
 WS_HOST = "raspberrypi.local"
 WS_PORT = 8765
+WS_RECONNECT_BACKOFF = [1, 2, 5]  # secondes, plafonné à 5s
 HSV_ORANGE_LOW = (5, 100, 100)
 HSV_ORANGE_HIGH = (25, 255, 255)
+CAMERA_INDEX = 0              # Changer selon la machine, override avec --camera N
 ```
 
 ---
@@ -163,6 +181,20 @@ acoustic/           visual/gcode_parser.py          visual/simulator.py
 
 Détail complet dans le test plan :
 `~/.gstack/projects/rr-djk-projet_kondar/rr-djk-main-eng-review-test-plan-*.md`
+
+---
+
+## Décisions ouvertes — tranchées le 2026-04-14
+
+| # | Question | Décision |
+|---|---|---|
+| Q1 | Acquittement alerte acoustique V1 | Pause auto du simulateur après 3s + touche `Espace` pour reprendre. Simule E-stop sans GPIO. |
+| Q2 | Re-baseline une fois RUNNING | Bouton désactivé en `RUNNING`. Badge "Baseline active" affiché. Redémarrer l'app pour recapturer. |
+| Q3 | Chargement G-code | Argument CLI : `python main_laptop.py demo.nc`. Pas de file picker en V1. |
+| Q4 | Seuils warn/critical | `ANOMALY_WARN_SIGMA = 2.0` → alerte jaune. `ANOMALY_CRITICAL_SIGMA = 3.0` → overlay rouge + pause. Les deux dans `config.py`. |
+| Q5 | Logging `.jsonl` | Logger synchrone dans boucle principale. Uniquement les transitions FSM, alertes et obstacles (pas chaque frame). Fichier `session_<ts>.jsonl`. |
+| Q6 | Index webcam | `CAMERA_INDEX = 0` dans `config.py` + override CLI `--camera N`. Pas d'auto-detect (comportement imprévisible sur hardware multiple). |
+| Q7 | Overlays simultanés ALERT_CRITICAL + PATH_BLOCKED | Panels indépendants. Panel droit rouge (acoustique). Panel gauche garde "CHEMIN IMPOSSIBLE". Deux flags indépendants dans la FSM : `acoustic_alert`, `path_blocked`. |
 
 ---
 
