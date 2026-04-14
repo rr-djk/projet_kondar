@@ -1,11 +1,14 @@
-# Documentation personnelle (racine uniquement)
+# Documentation personnelle (locale, non tracée)
 /sentinelle_cnc_blueprint.md
 /AGENTS.md
 /CLAUDE.md
 /CONVENTIONS.md
 /OPENCODE.md
+docs/sentinelle_cnc_blueprint.md
 
-# Evolution de travail (racine uniquement)
+# Evolution de travail (locale, non tracée)
 /TODOS.md
 /ARCHITECTURE.md
 /DESIGN.md
+docs/ARCHITECTURE.md
+docs/DESIGN.md
