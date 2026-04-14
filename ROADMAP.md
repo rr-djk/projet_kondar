@@ -15,7 +15,7 @@ Objectif : poser l'environnement, les constantes partagées et le contrat IPC av
 | Tâche | Fichier | Agent | Dépend de |
 |---|---|---|---|
 | 0.1 | Scaffold arborescence `sentinelle/` | implementation-specialist | — |
-| 0.2 | `config.py` — 14 constantes + `WEBCAM_MAX_RES = (640, 480)` + `ARUCO_THROTTLE_MS = 100` + `PLANNER_THROTTLE_MS = 200` + `requirements.txt` | implementation-specialist | T-0.1 |
+| 0.2 | `config.py` — 14 constantes + `WEBCAM_MAX_RES = (640, 480)` + `ARUCO_THROTTLE_MS = 100` + `PLANNER_THROTTLE_MS = 200` + `requirements.txt` (numpy, scipy, pygame, opencv-python, websockets, sounddevice avec versions pinnées) | implementation-specialist | T-0.1 |
 | 0.3 | `protocol.py` — `AcousticEvent`, `to_json`, `from_json`, `InvalidProtocolMessage(ValueError)` avec validation stricte (type, severity whitelist, ts entier) | implementation-specialist | T-0.2 |
 | 0.4 | `state.py` — FSM 8 états, 2 flags indépendants ; confirmer que A*_timeout ET A*_no_path déclenchent tous deux `path_blocked=True` ; transition CONFIRMER idempotente | implementation-specialist | T-0.3 |
 
