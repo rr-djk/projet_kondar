@@ -1,11 +1,11 @@
-# Documentation personnelle
-sentinelle_cnc_blueprint.md
-AGENTS.md
-CLAUDE.md
-CONVENTIONS.md
-OPENCODE.md
+# Documentation personnelle (racine uniquement)
+/sentinelle_cnc_blueprint.md
+/AGENTS.md
+/CLAUDE.md
+/CONVENTIONS.md
+/OPENCODE.md
 
-# Evolution de travail
-TODOS.md
-ARCHITECTURE.md
-DESIGN.md
+# Evolution de travail (racine uniquement)
+/TODOS.md
+/ARCHITECTURE.md
+/DESIGN.md
