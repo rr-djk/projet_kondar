@@ -37,11 +37,10 @@ async def capture_baseline(
     """
     start = time.monotonic()
     while time.monotonic() - start < duration_s:
-        block = capture.get_block(timeout=1.0)
+        block = await asyncio.to_thread(capture.get_block, 1.0)
         if block is not None:
             spectrum = compute_fft(block)
-            store.add_spectrum()
-            store.spectra[-1] = spectrum
+            store.add_spectrum(spectrum)
     store.compute()
     logger.info(
         "Baseline computed: mean=%.2f, std=%.2f",
@@ -63,7 +62,7 @@ async def monitor_loop(
         event_queue: Queue to push acoustic events.
     """
     while True:
-        block = capture.get_block(timeout=1.0)
+        block = await asyncio.to_thread(capture.get_block, 1.0)
         if block is None:
             continue
 
@@ -82,8 +81,11 @@ async def monitor_loop(
                 severity=severity,
                 ts=int(time.time() * 1000),
             )
-            await event_queue.put(event)
-            logger.info("Anomaly detected: %s", severity)
+            try:
+                event_queue.put_nowait(event)
+                logger.info("Anomaly detected: %s", severity)
+            except asyncio.QueueFull:
+                logger.warning("Event queue full, dropping %s event", severity)
 
 
 async def main() -> None:
@@ -92,28 +94,29 @@ async def main() -> None:
 
     capture = AudioCapture()
     store = BaselineStore()
-    event_queue: asyncio.Queue[AcousticEvent] = asyncio.Queue()
+    event_queue: asyncio.Queue[AcousticEvent] = asyncio.Queue(maxsize=50)
 
     capture.start()
     logger.info("Audio capture started")
 
-    # Capture baseline
-    logger.info("Capturing baseline for %ds...", config.BASELINE_DURATION_S)
-    await capture_baseline(capture, store)
-
-    if not store.sanity_check():
-        logger.error("Baseline sanity check failed — aborting")
-        capture.stop()
-        return
-
-    # Start monitoring + server
-    monitor_task = asyncio.create_task(monitor_loop(capture, store, event_queue))
     try:
-        await run_server(event_queue)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        # Capture baseline
+        logger.info("Capturing baseline for %ds...", config.BASELINE_DURATION_S)
+        await capture_baseline(capture, store)
+
+        if not store.sanity_check():
+            logger.error("Baseline sanity check failed — aborting")
+            return
+
+        # Start monitoring + server
+        monitor_task = asyncio.create_task(monitor_loop(capture, store, event_queue))
+        try:
+            await run_server(event_queue)
+        except asyncio.CancelledError:
+            logger.info("Shutting down...")
+        finally:
+            monitor_task.cancel()
     finally:
-        monitor_task.cancel()
         capture.stop()
 
 

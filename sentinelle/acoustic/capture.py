@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Callable
-
 import numpy as np
 import sounddevice as sd
 
@@ -47,12 +45,13 @@ class AudioCapture:
     ) -> None:
         """Sounddevice callback — push audio block to queue."""
         if status:
-            pass  # Log status if needed
+            import logging
+            logging.getLogger(__name__).warning("sounddevice xrun: %s", status)
         audio_block = indata[:, 0].copy()  # Mono
         try:
             self.queue.put_nowait(audio_block)
         except queue.Full:
-            pass  # Drop oldest block
+            pass  # Drop newest block (queue full — consumer too slow)
 
     def start(self) -> None:
         """Start audio capture."""

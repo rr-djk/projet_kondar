@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
 import websockets
 
@@ -34,7 +33,7 @@ class AcousticServer:
         self.host = host
         self.port = port
         self._clients: set[websockets.ServerConnection] = set()
-        self._server: websockets.WebSocketServerProtocol | None = None
+        self._server: websockets.Server | None = None
 
     async def emit(self, event: AcousticEvent) -> None:
         """Send an acoustic event to all connected clients.
@@ -43,10 +42,11 @@ class AcousticServer:
             event: The acoustic event to send.
         """
         message = to_json(event)
-        if not self._clients:
+        clients = set(self._clients)  # snapshot — avoid mutation during await
+        if not clients:
             return
         await asyncio.gather(
-            *[client.send(message) for client in self._clients],
+            *[client.send(message) for client in clients],
             return_exceptions=True,
         )
 

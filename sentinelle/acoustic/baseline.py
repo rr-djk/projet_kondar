@@ -66,10 +66,13 @@ class BaselineStore:
         """Verify baseline statistics are reasonable.
 
         Returns:
-            True if baseline_mean > 0 and baseline_std >= 0.
+            True if baseline_mean > 0 and baseline_std > 0.
+            std == 0 means all blocks had identical energy (mic disconnected or
+            silent environment) — thresholds would collapse to mean, triggering
+            false-critical on every block.
         """
         if not self.is_ready:
             return False
         if self.baseline_mean is None or self.baseline_std is None:
             return False
-        return self.baseline_mean > 0 and self.baseline_std >= 0
+        return self.baseline_mean > 0 and self.baseline_std > 0

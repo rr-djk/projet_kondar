@@ -90,16 +90,13 @@ def detect_anomaly(
         "critical" if amplitude >= baseline + critical_sigma * std,
         None otherwise.
     """
-    energy = np.sum(spectrum)
-
-    threshold_critical = baseline_mean + critical_sigma * baseline_std
-    threshold_warn = baseline_mean + warn_sigma * baseline_std
-
-    if energy >= threshold_critical:
-        return "critical"
-    elif energy >= threshold_warn:
-        return "warn"
-    return None
+    return detect_anomaly_from_energy(
+        float(np.sum(spectrum)),
+        baseline_mean,
+        baseline_std,
+        warn_sigma,
+        critical_sigma,
+    )
 
 
 def detect_anomaly_from_energy(
