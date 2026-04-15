@@ -154,7 +154,7 @@ Phase 0 (config + protocol + state)
 |---|---|---|
 | [x] Jalon 0 | `config`, `protocol`, `state` importables | Oui |
 | Jalon 1A | `main_pi.py` démarre, WebSocket opérationnel | Non (Pi requis) |
-| Jalon 1B | 4 modules Lane B importables et testables | Oui |
+| [x] Jalon 1B | 4 modules Lane B importables et testables | Oui |
 | Jalon 2 | `pytest` 36/36 verts | Oui |
 | Jalon 3 | Démo visuelle complète ≤ 30s | Oui (webcam uniquement) |
 | Jalon 4 | Critères DESIGN.md satisfaits, reproductible 3× | Non (Pi + webcam) |
