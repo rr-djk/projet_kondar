@@ -121,7 +121,7 @@ def find_path(
         return None
 
     deadline = time.monotonic() + _PLANNER_TIMEOUT_S
-    _, rows = config.GRID_SIZE
+    cols, rows = config.GRID_SIZE
 
     # A* implementation
     # Priority queue: (f_score, counter, grid_point)
@@ -158,7 +158,7 @@ def find_path(
             neighbor_key = (nx, ny)
 
             # Check bounds
-            if nx < 0 or nx >= config.GRID_SIZE[0] or ny < 0 or ny >= rows:
+            if nx < 0 or nx >= cols or ny < 0 or ny >= rows:
                 continue
 
             # Check if blocked
