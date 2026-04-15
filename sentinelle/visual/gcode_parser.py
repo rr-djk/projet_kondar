@@ -96,6 +96,11 @@ def parse_gcode(path: str) -> list[Segment]:
 
             end = Point(current_x, current_y)
 
+            # Skip zero-length segments (e.g. G1 F1000 — feed rate only, no movement).
+            # Downstream consumers computing direction/distance would divide by zero.
+            if start == end:
+                continue
+
             segments.append(Segment(start=start, end=end, move_type=move_type))
 
     return segments

@@ -113,6 +113,11 @@ class AcousticLink:
             except (ConnectionRefusedError, OSError, websockets.exceptions.WebSocketException) as exc:
                 logger.warning("WebSocket connection lost: %s", exc)
                 self._push_status(False)
+            except Exception as exc:  # noqa: BLE001
+                # Unexpected exception (bug in handler, MemoryError, etc.) — log and
+                # re-enter the backoff loop so the daemon thread never dies silently.
+                logger.error("Unexpected error in connect loop: %s", exc, exc_info=True)
+                self._push_status(False)
 
             if self._stop_event.is_set():
                 break
