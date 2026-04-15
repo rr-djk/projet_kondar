@@ -152,7 +152,7 @@ Phase 0 (config + protocol + state)
 
 | Jalon | Critère | Sans hardware |
 |---|---|---|
-| Jalon 0 | `config`, `protocol`, `state` importables | Oui |
+| [x] Jalon 0 | `config`, `protocol`, `state` importables | Oui |
 | Jalon 1A | `main_pi.py` démarre, WebSocket opérationnel | Non (Pi requis) |
 | Jalon 1B | 4 modules Lane B importables et testables | Oui |
 | Jalon 2 | `pytest` 36/36 verts | Oui |
