@@ -39,7 +39,7 @@ class Segment:
 # Regex pour extraire les commandes G0/G1 avec leurs coordonnées X/Y.
 # Capture le numéro de commande (0 ou 1) et les valeurs X/Y optionnelles.
 _GCODE_RE = re.compile(
-    r"G\s*(?P<code>[01])"
+    r"G\s*0*(?P<code>[01])(?!\d)"
     r"(?:\s*X\s*(?P<x>[+-]?\d*\.?\d+))?"
     r"(?:\s*Y\s*(?P<y>[+-]?\d*\.?\d+))?",
     re.IGNORECASE,
