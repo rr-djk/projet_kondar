@@ -14,6 +14,7 @@ import asyncio
 import logging
 import signal
 import time
+from typing import Literal
 
 import websockets
 
@@ -32,14 +33,14 @@ async def _emit_events(websocket: websockets.WebSocketServerProtocol) -> None:
     Args:
         websocket: Connexion WebSocket du client connecté.
     """
-    severities = ["warn", "critical"]
+    severities: list[Literal["warn", "critical"]] = ["warn", "critical"]
     index = 0
 
     while True:
         severity = severities[index % len(severities)]
         event = AcousticEvent(
             type="acoustic",
-            severity=severity,  # type: ignore[arg-type]
+            severity=severity,
             ts=int(time.time() * 1000),
         )
         message = to_json(event)
