@@ -50,8 +50,8 @@ class AcousticLink:
         self._queue: Queue[AcousticEvent | dict] = Queue(maxsize=50)
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._host = host or config.WS_HOST
-        self._port = port or config.WS_PORT
+        self._host = config.WS_HOST if host is None else host
+        self._port = config.WS_PORT if port is None else port
 
     def start(self) -> None:
         """Démarre le thread daemon de connexion WebSocket.
@@ -152,7 +152,8 @@ class AcousticLink:
                         logger.warning("Invalid protocol message: %s", exc)
                         # Continue processing — don't crash on bad messages
             finally:
-                self._push_status(False)
+                if not self._stop_event.is_set():
+                    self._push_status(False)
 
     def _push_event(self, event: AcousticEvent) -> None:
         """Push un événement acoustique dans la queue (non-bloquant).
