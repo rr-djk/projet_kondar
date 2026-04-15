@@ -126,14 +126,7 @@ class AcousticLink:
 
             logger.info("Reconnecting in %ds (attempt %d)...", delay, attempt)
 
-            # Interruptible sleep
-            try:
-                await asyncio.wait_for(
-                    asyncio.sleep(delay),
-                    timeout=delay + 0.1,
-                )
-            except asyncio.TimeoutError:
-                pass
+            await asyncio.sleep(delay)
 
             if self._stop_event.is_set():
                 break
@@ -142,16 +135,19 @@ class AcousticLink:
         """Session WebSocket connectée — reçoit et parse les messages."""
         async with websockets.connect(uri) as websocket:
             self._push_status(True)
-            async for raw_message in websocket:
-                if self._stop_event.is_set():
-                    break
+            try:
+                async for raw_message in websocket:
+                    if self._stop_event.is_set():
+                        break
 
-                try:
-                    event = from_json(raw_message)
-                    self._push_event(event)
-                except InvalidProtocolMessage as exc:
-                    logger.warning("Invalid protocol message: %s", exc)
-                    # Continue processing — don't crash on bad messages
+                    try:
+                        event = from_json(raw_message)
+                        self._push_event(event)
+                    except InvalidProtocolMessage as exc:
+                        logger.warning("Invalid protocol message: %s", exc)
+                        # Continue processing — don't crash on bad messages
+            finally:
+                self._push_status(False)
 
     def _push_event(self, event: AcousticEvent) -> None:
         """Push un événement acoustique dans la queue (non-bloquant).
