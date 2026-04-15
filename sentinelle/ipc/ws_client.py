@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 
 import websockets
 
@@ -161,7 +161,7 @@ class AcousticLink:
         """
         try:
             self._queue.put_nowait(event)
-        except Exception:  # queue.Full
+        except Full:
             # Queue pleine — drop l'événement pour ne pas bloquer
             logger.debug("Event queue full, dropping event")
 
@@ -169,5 +169,5 @@ class AcousticLink:
         """Push un événement de statut de connexion dans la queue."""
         try:
             self._queue.put_nowait({"type": "status", "connected": connected})
-        except Exception:  # queue.Full
+        except Full:
             logger.debug("Event queue full, dropping status event")
