@@ -66,10 +66,10 @@ async def _run_server(host: str, port: int) -> None:
         host: Adresse d'écoute (par défaut "localhost").
         port: Port d'écoute (par défaut config.WS_PORT).
     """
-    stop = asyncio.get_event_loop().create_future()
+    loop = asyncio.get_running_loop()
+    stop = loop.create_future()
 
     # Handle Ctrl+C gracefully
-    loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set_result, None)
 
