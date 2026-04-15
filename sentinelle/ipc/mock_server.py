@@ -72,7 +72,7 @@ async def _run_server(host: str, port: int) -> None:
 
     # Handle Ctrl+C gracefully
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set_result, None)
+        loop.add_signal_handler(sig, lambda: None if stop.done() else stop.set_result(None))
 
     async with websockets.serve(_handler, host, port):
         logger.info("Mock server démarré sur ws://%s:%d", host, port)
