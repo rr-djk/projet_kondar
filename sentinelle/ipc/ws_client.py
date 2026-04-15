@@ -109,6 +109,7 @@ class AcousticLink:
             uri = f"ws://{self._host}:{self._port}"
             try:
                 await self._run_session(uri)
+                attempt = 0  # Reset backoff after clean session
             except (ConnectionRefusedError, OSError, websockets.exceptions.WebSocketException) as exc:
                 logger.warning("WebSocket connection lost: %s", exc)
                 self._push_status(False)
