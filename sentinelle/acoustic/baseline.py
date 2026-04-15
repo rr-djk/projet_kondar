@@ -53,6 +53,7 @@ class BaselineStore:
 
         self.baseline_mean, self.baseline_std = compute_baseline(self.spectra)
         self.is_ready = True
+        self.spectra = []  # Free memory — spectra no longer needed after baseline is computed
         return self.baseline_mean, self.baseline_std
 
     def reset(self) -> None:
