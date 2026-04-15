@@ -75,6 +75,7 @@ Objectif : valider toutes les fonctions pures avant l'intégration. Peut être �
 | 2.6 | `tests/test_state.py` | test-automation-engineer | 7 transitions légales, 3 illégales (10 cas) | T-0.4 |
 | 2.7 | `tests/test_ws_client.py` | test-automation-engineer | event parsing valide, reconnect après coupure (via mock), queue non-bloquante, InvalidProtocolMessage catché sans crash (4 cas) | T-1B.4, T-1B.5 |
 | 2.8 | `tests/test_mock_server.py` | test-automation-engineer | émet events JSON valides selon protocol.py, warn et critical (2 cas) | T-1B.5 |
+| 2.9 | `.github/workflows/test.yml` — GitHub CI exécuter `pytest` à chaque push affectant un fichier Python | implementation-specialist | T-2.8 |
 
 **Jalon 2** : `pytest sentinelle/tests/` → 36/36 verts, zéro hardware, zéro webcam, zéro Pi.
 
