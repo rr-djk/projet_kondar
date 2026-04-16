@@ -7,17 +7,23 @@ Boucle pygame 60fps avec layout split-screen:
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
+import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pygame
 
 from sentinelle import config
 from sentinelle.ipc.ws_client import AcousticLink
 from sentinelle.protocol import AcousticEvent
 from sentinelle.state import AppState, Event, State
+from sentinelle.visual.gcode_parser import Segment, parse_gcode
+from sentinelle.visual.obstacle import BoundingBox, detect_obstacle
+from sentinelle.visual.planner import find_path
 
 # Palette Dashboard Industriel (Mode Sombre)
 COLOR_BG = (0x12, 0x12, 0x12)           # Deep Charcoal #121212
@@ -60,9 +66,23 @@ class Simulator:
 
         # G-code
         self._gcode_path = gcode_path
-        if gcode_path and not Path(gcode_path).exists():
-            print(f"[WARN] Fichier G-code introuvable: {gcode_path}")
-            self._gcode_path = None
+        self._gcode_error = None
+        if gcode_path:
+            if os.path.exists(gcode_path):
+                self.segments = parse_gcode(gcode_path)
+            else:
+                print(f"[WARN] G-code file not found: {gcode_path}")
+                self.segments = []
+                self._gcode_error = f"Fichier non trouvé:\n{gcode_path}"
+        else:
+            self.segments = []
+            self._gcode_error = "Aucun fichier G-code"
+
+        # Path planning state
+        self.original_segments = self.segments.copy()
+        self.current_path = []
+        self.last_planner_ts = 0
+        self.planner_throttle_ms = config.PLANNER_THROTTLE_MS
 
         # AcousticLink
         self._acoustic = AcousticLink()
@@ -140,8 +160,73 @@ class Simulator:
                 self._acoustic_connected = event.get("connected", False)
         return events
 
+    def _mm_to_pixel(self, x_mm: float, y_mm: float) -> tuple[int, int]:
+        """Convertit coordonnées mm en pixels dans le panel visuel."""
+        scale_x = VISUAL_PANEL_WIDTH / config.WORKSPACE_MM[0]
+        scale_y = SCREEN_HEIGHT / config.WORKSPACE_MM[1]
+        px = int(x_mm * scale_x)
+        py = int((config.WORKSPACE_MM[1] - y_mm) * scale_y)
+        return (px, py)
+
+    def _bbox_to_obstacle_set(self, bbox: BoundingBox) -> set[tuple[int, int]]:
+        """Convertit BoundingBox en ensemble de cellules grille (50×50)."""
+        cols, rows = config.GRID_SIZE
+        cw, ch = config.WEBCAM_MAX_RES
+        blocked: set[tuple[int, int]] = set()
+
+        x1 = int(bbox.x / cw * cols)
+        y1 = int(bbox.y / ch * rows)
+        x2 = int((bbox.x + bbox.w) / cw * cols)
+        y2 = int((bbox.y + bbox.h) / ch * rows)
+
+        x1 = max(0, min(x1, cols - 1))
+        y1 = max(0, min(y1, rows - 1))
+        x2 = max(0, min(x2, cols - 1))
+        y2 = max(0, min(y2, rows - 1))
+
+        for gx in range(x1, x2 + 1):
+            for gy in range(y1, y2 + 1):
+                blocked.add((gx, gy))
+
+        return blocked
+
+    def _update_path_planning(self) -> None:
+        """Détecte obstacles et recalcule path si nécessaire."""
+        try:
+            frame = self._frame_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        bbox = detect_obstacle(frame, allow_aruco=True)
+
+        if bbox is None:
+            if self._fsm.path_blocked:
+                self._fsm.transition(Event.PATH_FOUND)
+            self.segments = self.original_segments.copy()
+            self.current_path = []
+            return
+
+        obstacle_set = self._bbox_to_obstacle_set(bbox)
+
+        if not self.segments:
+            return
+
+        start_mm = (self.original_segments[0].start.x, self.original_segments[0].start.y)
+        end_mm = (self.original_segments[-1].end.x, self.original_segments[-1].end.y)
+
+        path = find_path(start_mm, end_mm, [bbox])
+
+        if path is None:
+            if not self._fsm.path_blocked:
+                self._fsm.transition(Event.PATH_BLOCKED)
+            self.current_path = []
+        else:
+            if self._fsm.path_blocked:
+                self._fsm.transition(Event.PATH_FOUND)
+            self.current_path = [(p.x, p.y) for p in path]
+
     def _update_fsm(self, events: list[dict]) -> None:
-        """Met à jour la FSM, gère throttle A* (placeholder pour T-3.2).
+        """Met à jour la FSM, gère throttle A*.
 
         Args:
             events: Liste des events acoustiques reçus.
@@ -152,28 +237,104 @@ class Simulator:
                 if severity == "warn":
                     try:
                         self._fsm.transition(Event.ACOUSTIC_WARN)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         pass
                 elif severity == "critical":
                     try:
                         self._fsm.transition(Event.ACOUSTIC_CRITICAL)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         pass
 
-    def _render_visual_panel(self, surface: pygame.Surface) -> None:
-        """Rend le panel visuel gauche (768×720).
+        now = time.time()
+        if now - self.last_planner_ts >= self.planner_throttle_ms / 1000:
+            self._update_path_planning()
+            self.last_planner_ts = now
 
-        Pour T-3.1: juste fond COLOR_SURFACE + grille légère.
-        """
+    def _draw_grid(self, surface: pygame.Surface) -> None:
+        """Dessine grille légère sur le panel."""
+        for x in range(0, VISUAL_PANEL_WIDTH, 50):
+            pygame.draw.line(surface, (0x33, 0x33, 0x44), (x, 0), (x, SCREEN_HEIGHT))
+        for y in range(0, SCREEN_HEIGHT, 50):
+            pygame.draw.line(surface, (0x33, 0x33, 0x44), (0, y), (VISUAL_PANEL_WIDTH, y))
+
+    def _draw_segments(self, surface: pygame.Surface, segments: list[Segment], color: tuple) -> None:
+        """Dessine segments G-code."""
+        for seg in segments:
+            start_px = self._mm_to_pixel(seg.start.x, seg.start.y)
+            end_px = self._mm_to_pixel(seg.end.x, seg.end.y)
+            pygame.draw.line(surface, color, start_px, end_px, 3)
+
+    def _draw_path(self, surface: pygame.Surface, path: list[tuple], color: tuple) -> None:
+        """Dessine path A* (liste de coordonnées grille)."""
+        if len(path) < 2:
+            return
+
+        points = []
+        for grid_x, grid_y in path:
+            x_mm = grid_x * (config.WORKSPACE_MM[0] / config.GRID_SIZE[0])
+            y_mm = grid_y * (config.WORKSPACE_MM[1] / config.GRID_SIZE[1])
+            px, py = self._mm_to_pixel(x_mm, y_mm)
+            points.append((px, py))
+
+        pygame.draw.lines(surface, color, False, points, 3)
+
+    def _draw_path_blocked_overlay(self, surface: pygame.Surface) -> None:
+        """Overlay 'CHEMIN IMPOSSIBLE' en magenta."""
+        font = pygame.font.Font(None, 64)
+        text = font.render("CHEMIN IMPOSSIBLE", True, COLOR_MAGENTA)
+        rect = text.get_rect(center=(VISUAL_PANEL_WIDTH // 2, SCREEN_HEIGHT // 2))
+        surface.blit(text, rect)
+
+        pygame.draw.rect(surface, COLOR_SURFACE, (300, 400, 168, 40))
+        font_small = pygame.font.Font(None, 32)
+        text_btn = font_small.render("Réessayer", True, COLOR_TEXT)
+        rect_btn = text_btn.get_rect(center=(384, 420))
+        surface.blit(text_btn, rect_btn)
+
+    def _draw_webcam_preview(self, surface: pygame.Surface) -> None:
+        """Affiche preview webcam 160×120 en coin inférieur droit."""
+        try:
+            frame = self._frame_queue.get_nowait()
+            small = cv2.resize(frame, (160, 120))
+            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            preview = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
+            surface.blit(preview, (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130))
+        except queue.Empty:
+            pygame.draw.rect(surface, (0x33, 0x33, 0x33),
+                           (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130, 160, 120))
+            font = pygame.font.Font(None, 24)
+            text = font.render("No camera", True, COLOR_TEXT)
+            surface.blit(text, (VISUAL_PANEL_WIDTH - 150, SCREEN_HEIGHT - 80))
+
+    def _render_visual_panel(self, surface: pygame.Surface) -> None:
+        """Rend le panel visuel gauche (768×720) avec G-code, obstacles, path."""
         surface.fill(COLOR_SURFACE)
 
-        # Grille légère
-        for x in range(0, VISUAL_PANEL_WIDTH, 50):
-            pygame.draw.line(surface, (40, 40, 50), (x, 0), (x, SCREEN_HEIGHT))
-        for y in range(0, SCREEN_HEIGHT, 50):
-            pygame.draw.line(surface, (40, 40, 50), (0, y), (VISUAL_PANEL_WIDTH, y))
+        self._draw_grid(surface)
 
-        # Badge CAMERA OFFLINE si webcam indisponible
+        if hasattr(self, '_gcode_error') and self._gcode_error:
+            font = pygame.font.Font(None, 32)
+            lines = self._gcode_error.split('\n')
+            for i, line in enumerate(lines):
+                text = font.render(line, True, COLOR_ALERT)
+                surface.blit(text, (20, 20 + i * 40))
+            return
+
+        if not self._fsm.path_blocked:
+            self._draw_segments(surface, self.original_segments, COLOR_ALERT)
+
+        if self.current_path:
+            self._draw_path(surface, self.current_path, COLOR_PRIMARY)
+
+        if self.segments:
+            start_px = self._mm_to_pixel(self.segments[0].start.x, self.segments[0].start.y)
+            pygame.draw.circle(surface, COLOR_PRIMARY, start_px, 8)
+
+        if self._fsm.path_blocked and not self.current_path:
+            self._draw_path_blocked_overlay(surface)
+
+        self._draw_webcam_preview(surface)
+
         if self._camera_offline:
             text = self._font.render("CAMERA OFFLINE", True, COLOR_ALERT)
             rect = text.get_rect(center=(VISUAL_PANEL_WIDTH // 2, 30))
