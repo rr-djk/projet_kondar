@@ -88,6 +88,11 @@ class Simulator:
         self._acoustic = AcousticLink()
         self._acoustic_connected = False
 
+        # État acoustique (T-3.3)
+        self._last_acoustic_ts = time.time()  # Dernier event reçu
+        self._critical_start_ts = None  # Quand l'alerte critical a commencé
+        self._acoustic_offline_timeout = 5.0  # Secondes avant badge OFFLINE
+
         # Threads démarrés dans start() pour permettre import/test sans side effects
         self._started = False
 
@@ -129,35 +134,54 @@ class Simulator:
         cap.release()
 
     def _handle_events(self) -> None:
-        """Gère les événements pygame (QUIT, MOUSEBUTTONDOWN, KEYDOWN)."""
+        """Gère événements pygame."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self._running = False
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self._running = False
+
                 elif event.key == pygame.K_SPACE:
-                    if self._fsm.state in (State.PAUSED_ACOUSTIC, State.CONFIRMING):
-                        self._fsm.transition(Event.RESUME)
+                    # Acquittement pour ALERT_CRITICAL ou PAUSED_ACOUSTIC
+                    if self._fsm.state in (
+                        State.ALERT_CRITICAL, State.PAUSED_ACOUSTIC
+                    ):
+                        # Vérifier que 3s se sont écoulées
+                        if self._critical_start_ts:
+                            elapsed = time.time() - self._critical_start_ts
+                            if elapsed >= 3.0:
+                                self._fsm.transition(Event.DISMISS)
+                                self._critical_start_ts = None
 
-    def _consume_queue(self) -> list[dict]:
-        """Lit la queue WebSocket sans bloquer.
+                elif event.key == pygame.K_r:
+                    # Reset d'EMERGENCY_STOP
+                    if self._fsm.state == State.EMERGENCY_STOP:
+                        self._fsm.transition(Event.RESET)
 
-        Retourne liste des events reçus depuis dernière frame.
+    def _consume_queue(self) -> list[AcousticEvent]:
+        """Lit la queue WebSocket et parse les events.
+
+        Returns:
+            Liste des AcousticEvent reçus.
         """
+        from sentinelle.protocol import from_json
+
         events = []
         while True:
-            event = self._acoustic.get_event()
-            if event is None:
+            msg = self._acoustic.get_event()
+            if msg is None:
                 break
-            if isinstance(event, AcousticEvent):
-                events.append({
-                    "type": "acoustic",
-                    "severity": event.severity,
-                    "ts": event.ts,
-                })
-            elif isinstance(event, dict) and event.get("type") == "status":
-                self._acoustic_connected = event.get("connected", False)
+            if isinstance(msg, str):
+                try:
+                    event = from_json(msg)
+                    events.append(event)
+                    self._last_acoustic_ts = time.time()
+                except Exception as e:
+                    print(f"Warning: Invalid message: {e}")
+            elif isinstance(msg, dict) and msg.get("type") == "status":
+                self._acoustic_connected = msg.get("connected", False)
         return events
 
     def _mm_to_pixel(self, x_mm: float, y_mm: float) -> tuple[int, int]:
@@ -225,27 +249,41 @@ class Simulator:
                 self._fsm.transition(Event.PATH_FOUND)
             self.current_path = [(p.x, p.y) for p in path]
 
-    def _update_fsm(self, events: list[dict]) -> None:
-        """Met à jour la FSM, gère throttle A*.
+    def _update_fsm(self, events: list[AcousticEvent]) -> None:
+        """Met à jour FSM selon events acoustiques."""
+        now = time.time()
 
-        Args:
-            events: Liste des events acoustiques reçus.
-        """
-        for evt in events:
-            if evt.get("type") == "acoustic":
-                severity = evt.get("severity")
-                if severity == "warn":
+        # Traiter events acoustiques
+        for event in events:
+            if event.severity == "warn":
+                if self._fsm.state not in (
+                    State.ALERT_WARN, State.ALERT_CRITICAL,
+                    State.PAUSED_ACOUSTIC, State.AUTO_OPTIMIZE
+                ):
                     try:
                         self._fsm.transition(Event.ACOUSTIC_WARN)
                     except Exception:
                         pass
-                elif severity == "critical":
+
+            elif event.severity == "critical":
+                if self._fsm.state not in (
+                    State.ALERT_CRITICAL, State.PAUSED_ACOUSTIC, State.EMERGENCY_STOP
+                ):
                     try:
                         self._fsm.transition(Event.ACOUSTIC_CRITICAL)
+                        self._critical_start_ts = now  # Pour le 3s d'attente
                     except Exception:
                         pass
 
-        now = time.time()
+        # Gestion AUTO_OPTIMIZE: retour à RUNNING_NORMAL après 5s sans alerte
+        if self._fsm.state == State.AUTO_OPTIMIZE:
+            if now - self._last_acoustic_ts > 5.0:
+                try:
+                    self._fsm.transition(Event.OPTIMIZE_COMPLETE)
+                except Exception:
+                    pass
+
+        # Path planning (existant)
         if now - self.last_planner_ts >= self.planner_throttle_ms / 1000:
             self._update_path_planning()
             self.last_planner_ts = now
@@ -341,20 +379,101 @@ class Simulator:
             surface.blit(text, rect)
 
     def _render_acoustic_panel(self, surface: pygame.Surface) -> None:
-        """Rend le panel données droit (512×720).
-
-        Pour T-3.1: juste fond COLOR_SURFACE + texte "Panel Données".
-        """
+        """Rend le panel droit avec données acoustiques."""
         surface.fill(COLOR_SURFACE)
 
         # Titre
-        title = self._font.render("Panel Données", True, COLOR_PRIMARY)
+        font_title = pygame.font.Font(None, 36)
+        title = font_title.render("Pilier Acoustique", True, COLOR_TEXT)
         surface.blit(title, (20, 20))
 
-        # Statut connexion acoustique
-        if not self._acoustic_connected:
-            status = self._font.render("ACOUSTIC OFFLINE", True, COLOR_ALERT)
-            surface.blit(status, (20, 50))
+        # Badge ACOUSTIC OFFLINE si pas d'event depuis 5s
+        now = time.time()
+        if now - self._last_acoustic_ts > self._acoustic_offline_timeout:
+            self._draw_offline_badge(surface)
+        else:
+            self._draw_online_badge(surface)
+
+        # Affichage état FSM
+        font_state = pygame.font.Font(None, 28)
+        state_text = f"État: {self._fsm.state.value}"
+        color = COLOR_TEXT
+        if self._fsm.state == State.ALERT_CRITICAL:
+            color = COLOR_ALERT
+        elif self._fsm.state == State.ALERT_WARN:
+            color = (0xFF, 0xCC, 0x00)  # Jaune
+        text = font_state.render(state_text, True, color)
+        surface.blit(text, (20, 110))
+
+        # Overlay si alerte active
+        if self._fsm.state == State.ALERT_CRITICAL:
+            self._draw_critical_overlay(surface)
+        elif self._fsm.state == State.ALERT_WARN:
+            self._draw_warn_overlay(surface)
+        elif self._fsm.state == State.EMERGENCY_STOP:
+            self._draw_emergency_overlay(surface)
+        elif self._fsm.state == State.AUTO_OPTIMIZE:
+            self._draw_optimize_overlay(surface)
+
+    def _draw_offline_badge(self, surface: pygame.Surface) -> None:
+        """Badge rouge 'ACOUSTIC OFFLINE'."""
+        pygame.draw.rect(surface, COLOR_ALERT, (20, 60, 200, 30))
+        font = pygame.font.Font(None, 24)
+        text = font.render("ACOUSTIC OFFLINE", True, (0xFF, 0xFF, 0xFF))
+        surface.blit(text, (30, 67))
+
+    def _draw_online_badge(self, surface: pygame.Surface) -> None:
+        """Badge vert 'ACOUSTIC ONLINE'."""
+        pygame.draw.rect(surface, (0x44, 0xFF, 0x44), (20, 60, 200, 30))
+        font = pygame.font.Font(None, 24)
+        text = font.render("ACOUSTIC ONLINE", True, (0x00, 0x00, 0x00))
+        surface.blit(text, (30, 67))
+
+    def _draw_critical_overlay(self, surface: pygame.Surface) -> None:
+        """Indicateur alerte critical dans panel droit."""
+        font = pygame.font.Font(None, 48)
+        text = font.render("CRITIQUE", True, COLOR_ALERT)
+        surface.blit(text, (20, 150))
+
+        # Compte à rebours 3s
+        if self._critical_start_ts:
+            elapsed = time.time() - self._critical_start_ts
+            remaining = max(0, 3.0 - elapsed)
+            font2 = pygame.font.Font(None, 32)
+            countdown = font2.render(
+                f"Attendre {remaining:.1f}s", True, COLOR_TEXT
+            )
+            surface.blit(countdown, (20, 200))
+
+            if remaining <= 0:
+                ok_text = font2.render("Appuyer ESPACE", True, COLOR_PRIMARY)
+                surface.blit(ok_text, (20, 230))
+
+    def _draw_warn_overlay(self, surface: pygame.Surface) -> None:
+        """Indicateur alerte warn (jaune)."""
+        font = pygame.font.Font(None, 36)
+        text = font.render("AVERTISSEMENT", True, (0xFF, 0xCC, 0x00))
+        surface.blit(text, (20, 150))
+
+    def _draw_emergency_overlay(self, surface: pygame.Surface) -> None:
+        """Overlay EMERGENCY STOP."""
+        font_big = pygame.font.Font(None, 48)
+        text = font_big.render("ARRET D'URGENCE", True, COLOR_ALERT)
+        surface.blit(text, (20, 150))
+
+        font_small = pygame.font.Font(None, 28)
+        instr = font_small.render("Appuyer 'R' pour reset", True, COLOR_TEXT)
+        surface.blit(instr, (20, 210))
+
+    def _draw_optimize_overlay(self, surface: pygame.Surface) -> None:
+        """Overlay AUTO_OPTIMIZE."""
+        font = pygame.font.Font(None, 32)
+        text = font.render("AUTO-OPTIMISATION", True, COLOR_PRIMARY)
+        surface.blit(text, (20, 150))
+
+        font2 = pygame.font.Font(None, 24)
+        sub = font2.render("Feed rate -20%", True, COLOR_TEXT)
+        surface.blit(sub, (20, 190))
 
     def run(self) -> None:
         """Boucle principale 60fps.
@@ -389,6 +508,14 @@ class Simulator:
             self._screen.fill(COLOR_BG)
             self._screen.blit(visual_surface, (0, 0))
             self._screen.blit(acoustic_surface, (VISUAL_PANEL_WIDTH, 0))
+
+            # Overlay rouge prioritaire si critical/emergency
+            if self._fsm.state in (State.ALERT_CRITICAL, State.EMERGENCY_STOP):
+                overlay = pygame.Surface(
+                    (SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA
+                )
+                overlay.fill((0xFF, 0x52, 0x52, 128))  # Rouge 50% alpha
+                self._screen.blit(overlay, (0, 0))
 
             # 5. Flip display
             pygame.display.flip()
