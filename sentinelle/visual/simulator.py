@@ -55,7 +55,12 @@ class Simulator:
 
         # FSM
         self._fsm = AppState()
-        self._baseline_ready = False
+
+        # État baseline
+        self._baseline_capturing = False
+        self._baseline_progress = 0.0  # 0.0 à 1.0
+        self._baseline_start_ts: float | None = None
+        self._baseline_ready = False  # Pour badge "Baseline active"
 
         # Webcam
         self._camera_index = camera_index
@@ -160,6 +165,11 @@ class Simulator:
                     if self._fsm.state == State.EMERGENCY_STOP:
                         self._fsm.transition(Event.RESET)
 
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Clic gauche
+                    mouse_pos = event.pos
+                    self._handle_mouse_click(mouse_pos)
+
     def _consume_queue(self) -> list[AcousticEvent]:
         """Lit la queue WebSocket et parse les events.
 
@@ -214,6 +224,35 @@ class Simulator:
 
         return blocked
 
+    def _handle_mouse_click(self, pos: tuple[int, int]) -> None:
+        """Gère les clics souris sur boutons."""
+        # Vérifier clic sur bouton BASELINE
+        # Bouton à (20, 250) dans panel droit qui commence à x=768
+        button_rect = pygame.Rect(768 + 20, 250, 120, 40)
+
+        if button_rect.collidepoint(pos):
+            self._start_baseline()
+
+    def _start_baseline(self) -> None:
+        """Démarre la capture de baseline."""
+        # Vérifier état autorisé
+        if self._fsm.state not in (State.IDLE, State.RUNNING_NORMAL):
+            print("Cannot start baseline: invalid state", self._fsm.state)
+            return
+
+        if self._baseline_capturing or self._baseline_ready:
+            print("Baseline already captured or in progress")
+            return
+
+        # Démarrer capture
+        self._baseline_capturing = True
+        self._baseline_progress = 0.0
+        self._baseline_start_ts = time.time()
+
+        # Transition FSM
+        self._fsm.transition(Event.START)
+        print("Baseline capture started")
+
     def _update_path_planning(self) -> None:
         """Détecte obstacles et recalcule path si nécessaire."""
         try:
@@ -250,8 +289,25 @@ class Simulator:
             self.current_path = [(p.x, p.y) for p in path]
 
     def _update_fsm(self, events: list[AcousticEvent]) -> None:
-        """Met à jour FSM selon events acoustiques."""
+        """Met à jour FSM et gère baseline."""
         now = time.time()
+
+        # Gestion baseline capture
+        if self._baseline_capturing and self._baseline_start_ts is not None:
+            elapsed = now - self._baseline_start_ts
+            duration = config.BASELINE_DURATION_S  # 10s
+
+            self._baseline_progress = min(1.0, elapsed / duration)
+
+            if elapsed >= duration:
+                # Capture terminée
+                self._baseline_capturing = False
+                self._baseline_ready = True
+                self._baseline_progress = 1.0
+
+                # Transition FSM
+                self._fsm.transition(Event.BASELINE_DONE)
+                print("Baseline capture completed")
 
         # Traiter events acoustiques
         for event in events:
@@ -379,13 +435,20 @@ class Simulator:
             surface.blit(text, rect)
 
     def _render_acoustic_panel(self, surface: pygame.Surface) -> None:
-        """Rend le panel droit avec données acoustiques."""
+        """Rend le panel droit avec données acoustiques et bouton BASELINE."""
         surface.fill(COLOR_SURFACE)
 
         # Titre
         font_title = pygame.font.Font(None, 36)
         title = font_title.render("Pilier Acoustique", True, COLOR_TEXT)
         surface.blit(title, (20, 20))
+
+        # Bouton BASELINE
+        self._draw_baseline_button(surface)
+
+        # Badge "Baseline active" si applicable
+        if self._baseline_ready:
+            self._draw_baseline_active_badge(surface)
 
         # Badge ACOUSTIC OFFLINE si pas d'event depuis 5s
         now = time.time()
@@ -474,6 +537,71 @@ class Simulator:
         font2 = pygame.font.Font(None, 24)
         sub = font2.render("Feed rate -20%", True, COLOR_TEXT)
         surface.blit(sub, (20, 190))
+
+    def _draw_baseline_button(self, surface: pygame.Surface) -> None:
+        """Dessine le bouton BASELINE avec état."""
+        # Position: sous le titre, x=20, y=250
+        button_rect = pygame.Rect(20, 250, 120, 40)
+
+        # Couleur selon état
+        if self._baseline_capturing:
+            # En cours: fond gris
+            color = (0x66, 0x66, 0x66)
+        elif self._baseline_ready:
+            # Déjà capturé: vert
+            color = (0x44, 0xAA, 0x44)
+        elif self._fsm.state in (State.IDLE, State.RUNNING_NORMAL):
+            # Actif: cyan
+            color = COLOR_PRIMARY
+        else:
+            # Désactivé: gris foncé
+            color = (0x44, 0x44, 0x44)
+
+        # Dessiner bouton
+        pygame.draw.rect(surface, color, button_rect, border_radius=4)
+        pygame.draw.rect(surface, COLOR_TEXT, button_rect, 2, border_radius=4)
+
+        # Texte
+        font = pygame.font.Font(None, 24)
+        if self._baseline_capturing:
+            text = font.render("CAPTURE...", True, COLOR_TEXT)
+        elif self._baseline_ready:
+            text = font.render("BASELINE ✓", True, COLOR_TEXT)
+        else:
+            text = font.render("BASELINE", True, (0x00, 0x00, 0x00))
+
+        text_rect = text.get_rect(center=button_rect.center)
+        surface.blit(text, text_rect)
+
+        # Barre de progression si capture en cours
+        if self._baseline_capturing:
+            self._draw_baseline_progress(surface, button_rect)
+
+    def _draw_baseline_progress(self, surface: pygame.Surface, button_rect: pygame.Rect) -> None:
+        """Barre de progression sous le bouton."""
+        progress_width = 200
+        progress_height = 10
+        x = button_rect.x
+        y = button_rect.bottom + 10
+
+        # Fond
+        pygame.draw.rect(surface, (0x33, 0x33, 0x33), (x, y, progress_width, progress_height))
+
+        # Remplissage
+        fill_width = int(progress_width * self._baseline_progress)
+        pygame.draw.rect(surface, COLOR_PRIMARY, (x, y, fill_width, progress_height))
+
+        # Pourcentage
+        font = pygame.font.Font(None, 20)
+        pct = font.render(f"{int(self._baseline_progress * 100)}%", True, COLOR_TEXT)
+        surface.blit(pct, (x + progress_width + 10, y))
+
+    def _draw_baseline_active_badge(self, surface: pygame.Surface) -> None:
+        """Badge vert 'Baseline active'."""
+        pygame.draw.rect(surface, (0x44, 0xAA, 0x44), (150, 250, 140, 30))
+        font = pygame.font.Font(None, 20)
+        text = font.render("Baseline active", True, COLOR_TEXT)
+        surface.blit(text, (160, 257))
 
     def run(self) -> None:
         """Boucle principale 60fps.
