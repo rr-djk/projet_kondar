@@ -22,6 +22,8 @@ class State(Enum):
     PAUSED_PATH_BLOCKED = "paused_path_blocked"
     PAUSED_ACOUSTIC = "paused_acoustic"
     CONFIRMING = "confirming"
+    AUTO_OPTIMIZE = "auto_optimize"  # Réduction auto feed rate 20%
+    EMERGENCY_STOP = "emergency_stop"  # Arrêt d'urgence
 
 
 class Event(Enum):
@@ -36,6 +38,8 @@ class Event(Enum):
     PATH_BLOCKED = "path_blocked"
     CONFIRMER = "confirmer"
     RESUME = "resume"
+    OPTIMIZE_COMPLETE = "optimize_complete"  # Retour auto après 5s sans alerte
+    RESET = "reset"  # Sortie d'EMERGENCY_STOP
 
 
 class InvalidTransition(Exception):
@@ -54,13 +58,19 @@ _TRANSITIONS: dict[tuple[State, Event], State] = {
     (State.ALERT_WARN, Event.ACOUSTIC_CRITICAL): State.ALERT_CRITICAL,
     (State.ALERT_WARN, Event.DISMISS): State.RUNNING_NORMAL,
     (State.ALERT_WARN, Event.PATH_BLOCKED): State.PAUSED_PATH_BLOCKED,
+    (State.ALERT_WARN, Event.ACOUSTIC_WARN): State.AUTO_OPTIMIZE,  # Double warn → auto-optimize
     (State.ALERT_CRITICAL, Event.DISMISS): State.RUNNING_NORMAL,
+    (State.ALERT_CRITICAL, Event.PATH_BLOCKED): State.EMERGENCY_STOP,  # Alert + blocked → emergency
     (State.PAUSED_PATH_BLOCKED, Event.PATH_FOUND): State.RUNNING_NORMAL,
     (State.PAUSED_PATH_BLOCKED, Event.CONFIRMER): State.CONFIRMING,
     (State.PAUSED_PATH_BLOCKED, Event.ACOUSTIC_CRITICAL): State.PAUSED_ACOUSTIC,
     (State.PAUSED_ACOUSTIC, Event.DISMISS): State.RUNNING_NORMAL,
     (State.CONFIRMING, Event.RESUME): State.RUNNING_NORMAL,
     (State.CONFIRMING, Event.CONFIRMER): State.CONFIRMING,  # idempotent
+    (State.CONFIRMING, Event.ACOUSTIC_CRITICAL): State.EMERGENCY_STOP,  # Critical during confirm → emergency
+    (State.AUTO_OPTIMIZE, Event.OPTIMIZE_COMPLETE): State.RUNNING_NORMAL,  # Retour auto après 5s
+    (State.AUTO_OPTIMIZE, Event.ACOUSTIC_CRITICAL): State.ALERT_CRITICAL,
+    (State.EMERGENCY_STOP, Event.RESET): State.IDLE,  # Reset manuel
 }
 
 

@@ -31,3 +31,6 @@ CAMERA_INDEX = 0              # Override CLI: --camera N
 WEBCAM_MAX_RES = (640, 480)   # Résolution max webcam
 ARUCO_THROTTLE_MS = 100       # Throttle ArUco fallback
 PLANNER_THROTTLE_MS = 200     # Throttle A* (max 5Hz)
+
+# Détection d'obstacles
+MIN_CONTOUR_AREA = 500        # Seuil minimal surface obstacle (pixels²)

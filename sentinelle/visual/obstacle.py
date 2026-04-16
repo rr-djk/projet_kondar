@@ -1,14 +1,16 @@
-"""Détection d'obstacles par masque HSV sur frame webcam.
+"""Détection d'obstacles par masque HSV + fallback ArUco sur frame webcam.
 
 Fonction pure : entrée (frame BGR) → sortie (BoundingBox | None).
 Aucun état global, aucun effet de bord.
 
-Note : Le fallback ArUco (T-1B.2b) est déféré — cette implémentation
-se concentre sur la détection HSV uniquement.
+Stratégie :
+1. Essayer détection HSV (orange) — rapide et fiable en bonnes conditions
+2. Si échec, fallback ArUco avec throttle (évite 12fps si lumière mauvaise)
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -33,46 +35,78 @@ class BoundingBox:
     h: int
 
 
-# Seuil minimal de surface (en pixels²) pour qu'un contour soit considéré
-# comme un obstacle valide. Évite les faux positifs sur le bruit.
-_MIN_CONTOUR_AREA = 500
+# MIN_CONTOUR_AREA déplacé dans config.py pour calibration centralisée
 
 
-def detect_obstacle(frame: np.ndarray) -> BoundingBox | None:
-    """Détecte un obstacle orange dans une frame webcam via masque HSV.
-
-    Convertit la frame BGR en HSV, applique un masque de couleur basé sur
-    les constantes HSV_ORANGE_LOW/HIGH de config.py, puis extrait le plus
-    grand contour valide.
-
-    Args:
-        frame: Image BGR brute de la webcam (numpy array H×W×3).
-
-    Returns:
-        BoundingBox du plus grand obstacle détecté, ou None si aucun
-        contour ne dépasse le seuil minimal de surface.
-    """
-    # Convert BGR → HSV
+def _detect_obstacle_hsv(frame: np.ndarray) -> BoundingBox | None:
+    """Détection HSV interne (orange)."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-    # Apply HSV mask for orange detection
     lower = np.array(config.HSV_ORANGE_LOW, dtype=np.uint8)
     upper = np.array(config.HSV_ORANGE_HIGH, dtype=np.uint8)
     mask = cv2.inRange(hsv, lower, upper)
-
-    # Find contours in the masked image
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
         return None
 
-    # Select the largest contour by area
     largest = max(contours, key=cv2.contourArea)
     area = cv2.contourArea(largest)
 
-    if area < _MIN_CONTOUR_AREA:
+    if area < config.MIN_CONTOUR_AREA:
         return None
 
-    # Extract bounding box
     x, y, w, h = cv2.boundingRect(largest)
     return BoundingBox(x=x, y=y, w=w, h=h)
+
+
+def _detect_obstacle_aruco(frame: np.ndarray) -> BoundingBox | None:
+    """Détection ArUco interne (fallback si HSV échoue).
+
+    Utilise les marqueurs ArUco 4x4 pour la détection robuste en
+    conditions de lumière variables.
+    """
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    parameters = cv2.aruco.DetectorParameters()
+    detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
+
+    corners, ids, _ = detector.detectMarkers(frame)
+
+    if ids is None or len(ids) == 0:
+        return None
+
+    # Prendre le premier marqueur détecté
+    marker_corners = corners[0][0]
+    x_min = int(marker_corners[:, 0].min())
+    y_min = int(marker_corners[:, 1].min())
+    x_max = int(marker_corners[:, 0].max())
+    y_max = int(marker_corners[:, 1].max())
+
+    return BoundingBox(x=x_min, y=y_min, w=x_max - x_min, h=y_max - y_min)
+
+
+def detect_obstacle(frame: np.ndarray, allow_aruco: bool = True) -> BoundingBox | None:
+    """Détecte un obstacle dans une frame webcam.
+
+    Stratégie :
+    1. Essayer détection HSV (orange) — rapide et précis
+    2. Si échec et allow_aruco=True, tenter ArUco
+
+    Args:
+        frame: Image BGR brute de la webcam (numpy array H×W×3).
+        allow_aruco: Si True, autorise le fallback ArUco. Le throttle
+            est géré par l'appelant via ARUCO_THROTTLE_MS.
+
+    Returns:
+        BoundingBox du plus grand obstacle détecté, ou None si aucun
+        obstacle n'est trouvé.
+    """
+    # Essayer HSV d'abord
+    result = _detect_obstacle_hsv(frame)
+    if result is not None:
+        return result
+
+    # Fallback ArUco si autorisé
+    if allow_aruco:
+        return _detect_obstacle_aruco(frame)
+
+    return None
