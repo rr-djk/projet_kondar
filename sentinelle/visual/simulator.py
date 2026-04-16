@@ -98,6 +98,11 @@ class Simulator:
         self._critical_start_ts = None  # Quand l'alerte critical a commencé
         self._acoustic_offline_timeout = 5.0  # Secondes avant badge OFFLINE
 
+        # État MUTE (T-3.3-ter)
+        self._mute_active = False
+        self._mute_end_ts = None  # Timestamp de fin du MUTE
+        self._false_positive_count = 0  # Compteur faux positifs
+
         # Threads démarrés dans start() pour permettre import/test sans side effects
         self._started = False
 
@@ -228,10 +233,15 @@ class Simulator:
         """Gère les clics souris sur boutons."""
         # Vérifier clic sur bouton BASELINE
         # Bouton à (20, 250) dans panel droit qui commence à x=768
-        button_rect = pygame.Rect(768 + 20, 250, 120, 40)
-
-        if button_rect.collidepoint(pos):
+        baseline_rect = pygame.Rect(768 + 20, 250, 120, 40)
+        if baseline_rect.collidepoint(pos):
             self._start_baseline()
+            return
+
+        # Clic sur bouton MUTE
+        mute_rect = pygame.Rect(768 + 20, 300, 120, 40)
+        if mute_rect.collidepoint(pos):
+            self._toggle_mute()
 
     def _start_baseline(self) -> None:
         """Démarre la capture de baseline."""
@@ -292,6 +302,9 @@ class Simulator:
         """Met à jour FSM et gère baseline."""
         now = time.time()
 
+        # Mise à jour MUTE
+        self._update_mute()
+
         # Gestion baseline capture
         if self._baseline_capturing and self._baseline_start_ts is not None:
             elapsed = now - self._baseline_start_ts
@@ -309,27 +322,32 @@ class Simulator:
                 self._fsm.transition(Event.BASELINE_DONE)
                 print("Baseline capture completed")
 
-        # Traiter events acoustiques
-        for event in events:
-            if event.severity == "warn":
-                if self._fsm.state not in (
-                    State.ALERT_WARN, State.ALERT_CRITICAL,
-                    State.PAUSED_ACOUSTIC, State.AUTO_OPTIMIZE
-                ):
-                    try:
-                        self._fsm.transition(Event.ACOUSTIC_WARN)
-                    except Exception:
-                        pass
+        # Traiter events acoustiques (SAUF si MUTE actif)
+        if not self._mute_active:
+            for event in events:
+                if event.severity == "warn":
+                    if self._fsm.state not in (
+                        State.ALERT_WARN, State.ALERT_CRITICAL,
+                        State.PAUSED_ACOUSTIC, State.AUTO_OPTIMIZE
+                    ):
+                        try:
+                            self._fsm.transition(Event.ACOUSTIC_WARN)
+                        except Exception:
+                            pass
 
-            elif event.severity == "critical":
-                if self._fsm.state not in (
-                    State.ALERT_CRITICAL, State.PAUSED_ACOUSTIC, State.EMERGENCY_STOP
-                ):
-                    try:
-                        self._fsm.transition(Event.ACOUSTIC_CRITICAL)
-                        self._critical_start_ts = now  # Pour le 3s d'attente
-                    except Exception:
-                        pass
+                elif event.severity == "critical":
+                    if self._fsm.state not in (
+                        State.ALERT_CRITICAL, State.PAUSED_ACOUSTIC, State.EMERGENCY_STOP
+                    ):
+                        try:
+                            self._fsm.transition(Event.ACOUSTIC_CRITICAL)
+                            self._critical_start_ts = now  # Pour le 3s d'attente
+                        except Exception:
+                            pass
+        else:
+            # MUTE actif: logguer les events ignorés
+            if events:
+                print(f"MUTE active: ignored {len(events)} acoustic events")
 
         # Gestion AUTO_OPTIMIZE: retour à RUNNING_NORMAL après 5s sans alerte
         if self._fsm.state == State.AUTO_OPTIMIZE:
@@ -446,9 +464,19 @@ class Simulator:
         # Bouton BASELINE
         self._draw_baseline_button(surface)
 
+        # Bouton MUTE
+        self._draw_mute_button(surface)
+
+        # Compteur faux positifs
+        self._draw_false_positive_counter(surface)
+
         # Badge "Baseline active" si applicable
         if self._baseline_ready:
             self._draw_baseline_active_badge(surface)
+
+        # Badge MUTE ACTIF si applicable
+        if self._mute_active:
+            self._draw_mute_active_badge(surface)
 
         # Badge ACOUSTIC OFFLINE si pas d'event depuis 5s
         now = time.time()
@@ -602,6 +630,80 @@ class Simulator:
         font = pygame.font.Font(None, 20)
         text = font.render("Baseline active", True, COLOR_TEXT)
         surface.blit(text, (160, 257))
+
+    def _draw_mute_button(self, surface: pygame.Surface) -> None:
+        """Dessine le bouton MUTE 30s."""
+        # Position: sous BASELINE, y=300
+        button_rect = pygame.Rect(20, 300, 120, 40)
+
+        # Couleur selon état
+        if self._mute_active:
+            # Actif: orange
+            color = (0xFF, 0x99, 0x00)
+        else:
+            # Inactif: gris
+            color = (0x66, 0x66, 0x66)
+
+        # Dessiner bouton
+        pygame.draw.rect(surface, color, button_rect, border_radius=4)
+        pygame.draw.rect(surface, COLOR_TEXT, button_rect, 2, border_radius=4)
+
+        # Texte
+        font = pygame.font.Font(None, 24)
+        if self._mute_active:
+            # Compte à rebours
+            remaining = max(0, self._mute_end_ts - time.time())
+            text = font.render(f"MUTE {int(remaining)}s", True, COLOR_TEXT)
+        else:
+            text = font.render("MUTE 30s", True, COLOR_TEXT)
+
+        text_rect = text.get_rect(center=button_rect.center)
+        surface.blit(text, text_rect)
+
+    def _draw_false_positive_counter(self, surface: pygame.Surface) -> None:
+        """Affiche le compteur de faux positifs."""
+        font = pygame.font.Font(None, 24)
+        text = font.render(f"Faux positifs: {self._false_positive_count}", True, COLOR_TEXT)
+        surface.blit(text, (20, 350))
+
+    def _draw_mute_active_badge(self, surface: pygame.Surface) -> None:
+        """Badge orange 'MUTE ACTIF'."""
+        pygame.draw.rect(surface, (0xFF, 0x99, 0x00), (150, 300, 120, 30))
+        font = pygame.font.Font(None, 20)
+        text = font.render("MUTE ACTIF", True, (0x00, 0x00, 0x00))
+        surface.blit(text, (160, 307))
+
+    def _toggle_mute(self) -> None:
+        """Active/désactive le MUTE 30s."""
+        if self._mute_active:
+            # Déjà actif: ignorer (pas de prolongation pour MVP)
+            print("MUTE already active")
+            return
+
+        # Activer MUTE
+        self._mute_active = True
+        self._mute_end_ts = time.time() + 30.0
+        self._false_positive_count += 1
+
+        print(f"MUTE activated (false positive #{self._false_positive_count})")
+
+        # Logger en JSONL (sera implémenté dans T-3.4)
+        # Pour l'instant, juste print
+        log_entry = {
+            "type": "mute",
+            "ts": int(time.time() * 1000),
+            "count": self._false_positive_count,
+            "duration_s": 30
+        }
+        print(f"LOG: {log_entry}")
+
+    def _update_mute(self) -> None:
+        """Met à jour l'état MUTE (appelé dans _update_fsm)."""
+        if self._mute_active:
+            if time.time() >= self._mute_end_ts:
+                self._mute_active = False
+                self._mute_end_ts = None
+                print("MUTE expired")
 
     def run(self) -> None:
         """Boucle principale 60fps.
