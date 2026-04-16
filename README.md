@@ -44,15 +44,38 @@ The operator stays in the loop — the system proposes, the human confirms. That
 
 ## Status
 
-Early development. Architecture in design phase.
+Active development. Visual demo complete and running.
 
-- [ ] Visual pillar simulator (2D path replanning demo)
-- [ ] Acoustic pillar prototype
-- [ ] Unified interface
-- [ ] Physical CNC integration (requires GRBL-based controller)
+- [x] Acoustic pillar — FFT baseline + anomaly detection, WebSocket server (Raspberry Pi)
+- [x] Visual pillar simulator — 2D path replanning demo, A* obstacle avoidance
+- [x] Unified interface — pygame dashboard, real-time overlays, FSM-driven alerts
+- [x] 51 unit tests, GitHub CI
+- [ ] Physical CNC integration (hardware test + demo video)
 
-Design document: [`DESIGN.md`](./DESIGN.md)
-Original blueprint: [`sentinelle_cnc_blueprint.md`](./sentinelle_cnc_blueprint.md)
+---
+
+## Quick Start (visual demo, no hardware required)
+
+```bash
+pip install -r requirements.txt
+python3 -m sentinelle.main_laptop demo.nc
+```
+
+The simulator opens at 1280×720. Left panel: G-code toolpath + webcam obstacle detection. Right panel: acoustic pillar status + alerts.
+
+1. Press **BASELINE** to calibrate the acoustic detector (10s capture)
+2. Hold an orange object in front of the webcam — the path replans in real-time
+3. `SPACE` acknowledges acoustic alerts, `R` resets after emergency stop
+
+To test the acoustic pillar without a Raspberry Pi:
+```bash
+python3 -m sentinelle.ipc.mock_server  # synthetic acoustic events on ws://localhost:8765
+```
+
+---
+
+Design document: [`docs/DESIGN.md`](./docs/DESIGN.md)
+Architecture: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 
 ---
 
