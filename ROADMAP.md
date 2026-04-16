@@ -27,15 +27,15 @@ Objectif : poser l'environnement, les constantes partagées et le contrat IPC av
 
 Objectif : implémenter les composants Pi. Peut progresser en parallèle avec la Lane B.
 
-| Tâche | Fichier | Agent | Dépend de |
-|---|---|---|---|
-| 1A.1 | `acoustic/analyzer.py` — fonctions pures FFT | implementation-specialist | T-0.2 |
-| 1A.2 | `acoustic/baseline.py` — `BaselineStore` (état mutable isolé) | implementation-specialist | T-1A.1 |
-| 1A.3 | `acoustic/capture.py` — adapter sounddevice | implementation-specialist | T-1A.1, T-1A.2 |
-| 1A.4 | `acoustic/server.py` — asyncio WebSocket port 8765 | implementation-specialist | T-0.3 |
-| 1A.5 | `main_pi.py` — orchestration Pi | implementation-specialist | T-1A.1, T-1A.2, T-1A.3, T-1A.4 |
+| Tâche | Fichier | Agent | Dépend de | Statut |
+|---|---|---|---|---|
+| 1A.1 | `acoustic/analyzer.py` — fonctions pures FFT | implementation-specialist | T-0.2 | ✅ |
+| 1A.2 | `acoustic/baseline.py` — `BaselineStore` (état mutable isolé) | implementation-specialist | T-1A.1 | ✅ |
+| 1A.3 | `acoustic/capture.py` — adapter sounddevice | implementation-specialist | T-1A.1, T-1A.2 | ✅ |
+| 1A.4 | `acoustic/server.py` — asyncio WebSocket port 8765 | implementation-specialist | T-0.3 | ✅ |
+| 1A.5 | `main_pi.py` — orchestration Pi | implementation-specialist | T-1A.1, T-1A.2, T-1A.3, T-1A.4 | ✅ |
 
-**Jalon 1A** : `python main_pi.py` démarre, serveur écoute sur 8765, events JSON valides émis sur signal synthétique.
+**[x] Jalon 1A** : `python main_pi.py` démarre, serveur écoute sur 8765, events JSON valides émis sur signal synthétique. Commit: `d6eba41`
 
 ---
 
@@ -64,20 +64,20 @@ Objectif : implémenter les quatre modules purs. Aucun hardware requis, tous tes
 
 Objectif : valider toutes les fonctions pures avant l'intégration. Peut être écrite au fil des modules Lane B.
 
-| Tâche | Fichier | Agent | Cas couverts | Dépend de |
-|---|---|---|---|---|
-| 2.1 | `tests/test_analyzer.py` | test-automation-engineer | baseline normale, warn 2.0σ, critical 3.0σ, limite 1.9σ, buffer partiel (5 cas) | T-1A.1 |
-| 2.2 | `tests/test_gcode_parser.py` | test-automation-engineer | G0+G1 valides, fichier vide, lignes ignorées (3 cas) | T-1B.1 |
-| 2.3 | `tests/test_planner.py` | test-automation-engineer | chemin libre, contournement, aucun chemin → None, timeout 150ms (4 cas) | T-1B.3 |
-| 2.4 | `tests/test_obstacle.py` | test-automation-engineer | image orange → BoundingBox, image grise → None (2 cas) | T-1B.2 |
-| 2.4b | `tests/test_obstacle_aruco.py` | test-automation-engineer | ArUco marker → BoundingBox, image sans ArUco → None, HSV first puis ArUco, throttle ARUCO_THROTTLE_MS (4 cas) | T-1B.2b |
-| 2.5 | `tests/test_protocol.py` | test-automation-engineer | round-trip JSON ×2, champ manquant → erreur (3 cas) | T-0.3 |
-| 2.6 | `tests/test_state.py` | test-automation-engineer | 7 transitions légales, 3 illégales (10 cas) | T-0.4 |
-| 2.7 | `tests/test_ws_client.py` | test-automation-engineer | event parsing valide, reconnect après coupure (via mock), queue non-bloquante, InvalidProtocolMessage catché sans crash (4 cas) | T-1B.4, T-1B.5 |
-| 2.8 | `tests/test_mock_server.py` | test-automation-engineer | émet events JSON valides selon protocol.py, warn et critical (2 cas) | T-1B.5 |
-| 2.9 | `.github/workflows/test.yml` — GitHub CI exécuter `pytest` à chaque push affectant un fichier Python | implementation-specialist | T-2.8 |
+| Tâche | Fichier | Agent | Cas couverts | Dépend de | Statut |
+|---|---|---|---|---|---|
+| 2.1 | `tests/test_analyzer.py` | test-automation-engineer | baseline normale, warn 2.0σ, critical 3.0σ, limite 1.9σ, buffer partiel (5 cas) | T-1A.1 | ✅ |
+| 2.2 | `tests/test_gcode_parser.py` | test-automation-engineer | G0+G1 valides, fichier vide, lignes ignorées (3 cas) | T-1B.1 | ✅ |
+| 2.3 | `tests/test_planner.py` | test-automation-engineer | chemin libre, contournement, aucun chemin → None, timeout 150ms (4 cas) | T-1B.3 | ✅ |
+| 2.4 | `tests/test_obstacle.py` | test-automation-engineer | image orange → BoundingBox, image grise → None (2 cas) | T-1B.2 | ✅ |
+| 2.4b | `tests/test_obstacle_aruco.py` | test-automation-engineer | ArUco marker → BoundingBox, image sans ArUco → None, HSV first puis ArUco, throttle ARUCO_THROTTLE_MS (4 cas) | T-1B.2b | ✅ |
+| 2.5 | `tests/test_protocol.py` | test-automation-engineer | round-trip JSON ×2, champ manquant → erreur (3 cas) | T-0.3 | ✅ |
+| 2.6 | `tests/test_state.py` | test-automation-engineer | 7 transitions légales, 3 illégales (10 cas) | T-0.4 | ✅ |
+| 2.7 | `tests/test_ws_client.py` | test-automation-engineer | event parsing valide, reconnect après coupure (via mock), queue non-bloquante, InvalidProtocolMessage catché sans crash (4 cas) | T-1B.4, T-1B.5 | ✅ |
+| 2.8 | `tests/test_mock_server.py` | test-automation-engineer | émet events JSON valides selon protocol.py, warn et critical (2 cas) | T-1B.5 | ✅ |
+| 2.9 | `.github/workflows/test.yml` — GitHub CI exécuter `pytest` sur toutes branches | implementation-specialist | T-2.8 | ✅ |
 
-**Jalon 2** : `pytest sentinelle/tests/` → 36/36 verts, zéro hardware, zéro webcam, zéro Pi.
+**[x] Jalon 2** : `pytest sentinelle/tests/` → 51/51 verts (historique), zéro hardware, zéro webcam, zéro Pi. Commit: `18d3ddf`. CI configuré dans `.github/workflows/test.yml`.
 
 ---
 
@@ -154,9 +154,13 @@ Phase 0 (config + protocol + state)
 | Jalon | Critère | Sans hardware |
 |---|---|---|
 | [x] Jalon 0 | `config`, `protocol`, `state` importables | Oui |
-| Jalon 1A | `main_pi.py` démarre, WebSocket opérationnel | Non (Pi requis) |
+| [x] Jalon 1A | `main_pi.py` démarre, WebSocket opérationnel | Non (Pi requis) |
 | [x] Jalon 1B | 4 modules Lane B importables et testables | Oui |
-| Jalon 2 | `pytest` 36/36 verts | Oui |
+| [x] Jalon 2 | `pytest` 51/51 verts + CI configuré | Oui |
 | Jalon 3 | Démo visuelle complète ≤ 30s | Oui (webcam uniquement) |
 | Jalon 4 | Critères DESIGN.md satisfaits, reproductible 3× | Non (Pi + webcam) |
 | Jalon 5 | Projet livrable, README, dépôt public | — |
+
+---
+
+**Mis à jour le 2026-04-15** — Phases 1A et 2 terminées.
