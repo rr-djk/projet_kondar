@@ -187,3 +187,47 @@ e5a5b52 Ajoute T-3.3 intégration pilier acoustique
 ```
 
 **Mis à jour le 2026-04-16** — Phase 3 complète ✅ | 8 commits | 51 tests verts | Démo visuelle fonctionnelle
+
+---
+
+## Design Review — 2026-04-16
+
+**Outil :** `/plan-design-review` (gstack)
+**Commit de référence :** `b2c00ef`
+**Score global :** 5/10 → 7/10
+
+### Résumé des passes
+
+| Passe | Dimension | Score initial | Score final | Statut |
+|-------|-----------|---------------|-------------|--------|
+| 1 | Information Architecture | 4/10 | 7/10 | IDLE state non designé → décision actée |
+| 2 | Interaction States | 6/10 | 7/10 | Post-RESET state à documenter |
+| 3 | User Journey | 4/10 | 6/10 | Étapes 1-2 (démarrage) non couvertes |
+| 4 | AI Slop Risk | 8/10 | 8/10 | Aucun problème — app industrielle |
+| 5 | Design System | 5/10 | 7/10 | `COLOR_SUCCESS`, `COLOR_WARN`, font scale manquants |
+| 6 | Responsive / A11y | 3/10 | 7/10 | Légende raccourcis clavier manquante |
+| 7 | Décisions ouvertes | — | — | 7 identifiées, 0 déférées sans décision |
+
+### Décisions prises
+
+1. **État IDLE = onboarding visuel distinct** — bouton BASELINE mis en avant (fond cyan, texte "Étape 1") quand `baseline_ready=False`. Alertes acoustiques grisées jusqu'à baseline capturée.
+2. **Légende raccourcis clavier** dans le panel droit (bas) : `ESPACE : ack alerte | R : reset | ESC : quitter`.
+3. **`COLOR_SUCCESS`** et **`COLOR_WARN`** à ajouter dans `simulator.py` (actuellement hardcodés inline).
+4. **Typographic scale** à définir : `FONT_H1=48`, `FONT_H2=36`, `FONT_BODY=24`, `FONT_LABEL=16`.
+5. **README mis à jour** — section Status corrigée, Quick Start ajouté (fait en session).
+6. **Post-RESET state** — vérifier que les overlays visuels sont effacés après `EMERGENCY_STOP + R`.
+
+### TODOs créés (voir `TODOS.md`)
+
+| Ref | Description | Priorité |
+|-----|-------------|----------|
+| [UX] README stale | Checkboxes et statut corrigés (fait en session) | ✅ fait |
+| [UX] Design system | `COLOR_SUCCESS`, `COLOR_WARN`, font scale | P2 — Phase 5 |
+| [UX] Onboarding IDLE | State visuel dédié pour baseline_ready=False | P1 — avant T-4.3 |
+| [UX] Légende clavier | `ESPACE / R / ESC` visibles dans le panel | P1 — avant T-4.3 |
+
+### Ce qui n'est PAS dans le scope de cette review
+
+- Responsive / HiDPI (V2 uniquement)
+- Localisation anglais/français (non spécifié dans DESIGN.md)
+- Interface web (V1 = desktop pygame)
