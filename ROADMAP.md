@@ -157,10 +157,10 @@ Phase 0 (config + protocol + state)
 | [x] Jalon 1A | `main_pi.py` démarre, WebSocket opérationnel | Non (Pi requis) |
 | [x] Jalon 1B | 4 modules Lane B importables et testables | Oui |
 | [x] Jalon 2 | `pytest` 51/51 verts + CI configuré | Oui |
-| Jalon 3 | Démo visuelle complète ≤ 30s | Oui (webcam uniquement) |
+| [x] Jalon 3 | Démo visuelle complète ≤ 30s | Oui (webcam uniquement) |
 | Jalon 4 | Critères DESIGN.md satisfaits, reproductible 3× | Non (Pi + webcam) |
 | Jalon 5 | Projet livrable, README, dépôt public | — |
 
 ---
 
-**Mis à jour le 2026-04-15** — Phases 1A et 2 terminées.
+**Mis à jour le 2026-04-15** — Phase 3 (Jalon 3) terminée. Démo visuelle complète fonctionnelle.
