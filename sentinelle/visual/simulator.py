@@ -7,6 +7,7 @@ Boucle pygame 60fps avec layout split-screen:
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -44,8 +45,17 @@ FPS_TARGET = 60
 class Simulator:
     """Simulateur visuel SENTINELLE CNC avec intégration pilier acoustique."""
 
-    def __init__(self, gcode_path: str | None = None, camera_index: int = 0) -> None:
-        """Initialise le simulateur pygame, FSM, webcam et AcousticLink."""
+    def __init__(self, gcode_path: str | None = None, camera_index: int = 0, logger=None) -> None:
+        """Initialise le simulateur pygame, FSM, webcam et AcousticLink.
+
+        Args:
+            gcode_path: Chemin vers le fichier G-code (.nc)
+            camera_index: Index de la webcam (default: 0)
+            logger: File handle pour logging JSONL (optionnel)
+        """
+        # Logger JSONL (optionnel)
+        self._logger = logger
+
         # Pygame
         pygame.init()
         self._screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -118,6 +128,22 @@ class Simulator:
         )
         self._cam_thread.start()
         self._acoustic.start()
+
+    def _log_event(self, event_type: str, data: dict | None = None) -> None:
+        """Log un événement si logger configuré.
+
+        Args:
+            event_type: Type d'événement (ex: "fsm_transition", "obstacle")
+            data: Données additionnelles à logger
+        """
+        if self._logger:
+            entry = {
+                "type": event_type,
+                "ts": int(time.time() * 1000),
+                **(data or {})
+            }
+            self._logger.write(json.dumps(entry) + "\n")
+            self._logger.flush()
 
     def _capture_loop(self) -> None:
         """Thread séparé pour capture webcam. Garde uniquement le dernier frame."""
@@ -260,8 +286,17 @@ class Simulator:
         self._baseline_start_ts = time.time()
 
         # Transition FSM
+        from_state = self._fsm.state
         self._fsm.transition(Event.START)
         print("Baseline capture started")
+
+        # Log
+        self._log_event("baseline_start", {})
+        self._log_event("fsm_transition", {
+            "from": from_state.value,
+            "to": self._fsm.state.value,
+            "event": "START"
+        })
 
     def _update_path_planning(self) -> None:
         """Détecte obstacles et recalcule path si nécessaire."""
@@ -274,12 +309,27 @@ class Simulator:
 
         if bbox is None:
             if self._fsm.path_blocked:
+                from_state = self._fsm.state
                 self._fsm.transition(Event.PATH_FOUND)
+                self._log_event("fsm_transition", {
+                    "from": from_state.value,
+                    "to": self._fsm.state.value,
+                    "event": "PATH_FOUND"
+                })
             self.segments = self.original_segments.copy()
             self.current_path = []
             return
 
         obstacle_set = self._bbox_to_obstacle_set(bbox)
+
+        # Log obstacle
+        grid_cols, grid_rows = config.GRID_SIZE
+        center_x = int((bbox.x + bbox.w / 2) / config.WEBCAM_MAX_RES[0] * grid_cols)
+        center_y = int((bbox.y + bbox.h / 2) / config.WEBCAM_MAX_RES[1] * grid_rows)
+        self._log_event("obstacle", {
+            "grid_pos": [center_x, center_y],
+            "bbox": {"x": bbox.x, "y": bbox.y, "w": bbox.w, "h": bbox.h}
+        })
 
         if not self.segments:
             return
@@ -291,11 +341,23 @@ class Simulator:
 
         if path is None:
             if not self._fsm.path_blocked:
+                from_state = self._fsm.state
                 self._fsm.transition(Event.PATH_BLOCKED)
+                self._log_event("fsm_transition", {
+                    "from": from_state.value,
+                    "to": self._fsm.state.value,
+                    "event": "PATH_BLOCKED"
+                })
             self.current_path = []
         else:
             if self._fsm.path_blocked:
+                from_state = self._fsm.state
                 self._fsm.transition(Event.PATH_FOUND)
+                self._log_event("fsm_transition", {
+                    "from": from_state.value,
+                    "to": self._fsm.state.value,
+                    "event": "PATH_FOUND"
+                })
             self.current_path = [(p.x, p.y) for p in path]
 
     def _update_fsm(self, events: list[AcousticEvent]) -> None:
@@ -314,13 +376,25 @@ class Simulator:
 
             if elapsed >= duration:
                 # Capture terminée
+                duration_ms = int((now - self._baseline_start_ts) * 1000)
                 self._baseline_capturing = False
                 self._baseline_ready = True
                 self._baseline_progress = 1.0
 
                 # Transition FSM
+                from_state = self._fsm.state
                 self._fsm.transition(Event.BASELINE_DONE)
                 print("Baseline capture completed")
+
+                # Log
+                self._log_event("baseline_complete", {
+                    "duration_ms": duration_ms
+                })
+                self._log_event("fsm_transition", {
+                    "from": from_state.value,
+                    "to": self._fsm.state.value,
+                    "event": "BASELINE_DONE"
+                })
 
         # Traiter events acoustiques (SAUF si MUTE actif)
         if not self._mute_active:
@@ -331,7 +405,13 @@ class Simulator:
                         State.PAUSED_ACOUSTIC, State.AUTO_OPTIMIZE
                     ):
                         try:
+                            from_state = self._fsm.state
                             self._fsm.transition(Event.ACOUSTIC_WARN)
+                            self._log_event("fsm_transition", {
+                                "from": from_state.value,
+                                "to": self._fsm.state.value,
+                                "event": "ACOUSTIC_WARN"
+                            })
                         except Exception:
                             pass
 
@@ -340,20 +420,33 @@ class Simulator:
                         State.ALERT_CRITICAL, State.PAUSED_ACOUSTIC, State.EMERGENCY_STOP
                     ):
                         try:
+                            from_state = self._fsm.state
                             self._fsm.transition(Event.ACOUSTIC_CRITICAL)
                             self._critical_start_ts = now  # Pour le 3s d'attente
+                            self._log_event("fsm_transition", {
+                                "from": from_state.value,
+                                "to": self._fsm.state.value,
+                                "event": "ACOUSTIC_CRITICAL"
+                            })
                         except Exception:
                             pass
         else:
             # MUTE actif: logguer les events ignorés
             if events:
                 print(f"MUTE active: ignored {len(events)} acoustic events")
+                self._log_event("mute_ignored_events", {"count": len(events)})
 
         # Gestion AUTO_OPTIMIZE: retour à RUNNING_NORMAL après 5s sans alerte
         if self._fsm.state == State.AUTO_OPTIMIZE:
             if now - self._last_acoustic_ts > 5.0:
                 try:
+                    from_state = self._fsm.state
                     self._fsm.transition(Event.OPTIMIZE_COMPLETE)
+                    self._log_event("fsm_transition", {
+                        "from": from_state.value,
+                        "to": self._fsm.state.value,
+                        "event": "OPTIMIZE_COMPLETE"
+                    })
                 except Exception:
                     pass
 
@@ -687,15 +780,11 @@ class Simulator:
 
         print(f"MUTE activated (false positive #{self._false_positive_count})")
 
-        # Logger en JSONL (sera implémenté dans T-3.4)
-        # Pour l'instant, juste print
-        log_entry = {
-            "type": "mute",
-            "ts": int(time.time() * 1000),
+        # Log JSONL
+        self._log_event("mute", {
             "count": self._false_positive_count,
             "duration_s": 30
-        }
-        print(f"LOG: {log_entry}")
+        })
 
     def _update_mute(self) -> None:
         """Met à jour l'état MUTE (appelé dans _update_fsm)."""
