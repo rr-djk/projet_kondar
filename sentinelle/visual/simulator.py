@@ -497,19 +497,40 @@ class Simulator:
         surface.blit(text_btn, rect_btn)
 
     def _draw_webcam_preview(self, surface: pygame.Surface) -> None:
-        """Affiche preview webcam 160×120 en coin inférieur droit."""
+        """Affiche preview webcam 160×120 en coin inférieur droit.
+
+        Garde le dernier frame valide pour éviter les palpitations
+        quand la capture est plus lente que le rendu.
+        """
+        # Essayer de récupérer le frame le plus récent
+        fresh_frame = False
         try:
-            frame = self._frame_queue.get_nowait()
-            small = cv2.resize(frame, (160, 120))
-            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-            preview = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
-            surface.blit(preview, (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130))
+            while True:  # Vider la queue pour avoir le plus récent
+                self._last_camera_frame = self._frame_queue.get_nowait()
+                self._last_camera_frame_time = time.time()
+                fresh_frame = True
         except queue.Empty:
-            pygame.draw.rect(surface, (0x33, 0x33, 0x33),
-                           (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130, 160, 120))
-            font = pygame.font.Font(None, 24)
-            text = font.render("No camera", True, COLOR_TEXT)
-            surface.blit(text, (VISUAL_PANEL_WIDTH - 150, SCREEN_HEIGHT - 80))
+            pass
+
+        # Afficher le dernier frame connu s'il est récent (< 2s)
+        if (hasattr(self, '_last_camera_frame') and
+            self._last_camera_frame is not None and
+            time.time() - getattr(self, '_last_camera_frame_time', 0) < 2.0):
+            try:
+                small = cv2.resize(self._last_camera_frame, (160, 120))
+                rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                preview = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
+                surface.blit(preview, (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130))
+                return
+            except Exception:
+                pass  # Fallback sur "No camera" si erreur de conversion
+
+        # Pas de frame valide disponible
+        pygame.draw.rect(surface, (0x33, 0x33, 0x33),
+                       (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130, 160, 120))
+        font = pygame.font.Font(None, 24)
+        text = font.render("No camera", True, COLOR_TEXT)
+        surface.blit(text, (VISUAL_PANEL_WIDTH - 150, SCREEN_HEIGHT - 80))
 
     def _render_visual_panel(self, surface: pygame.Surface) -> None:
         """Rend le panel visuel gauche (768×720) avec G-code, obstacles, path."""

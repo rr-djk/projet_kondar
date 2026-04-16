@@ -1,0 +1,3 @@
+{"type": "session_start", "ts": 1776309971904, "version": "1.0.0", "args": {"gcode_file": "demo.nc", "camera": 0}}
+{"type": "error", "ts": 1776309971904, "message": "No module named 'sentinelle'"}
+{"type": "session_end", "ts": 1776309971904, "reason": "exception", "duration_ms": 0}
