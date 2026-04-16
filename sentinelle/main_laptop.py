@@ -43,15 +43,20 @@ def parse_args():
 
 
 def setup_logging() -> tuple[str, object]:
-    """Configure le logging JSONL.
-    
+    """Configure le logging JSONL dans sentinelle/logs/.
+
     Returns:
         Tuple (chemin_fichier, file_handle)
     """
+    # Déterminer le répertoire des logs (dans sentinelle/logs/)
+    script_dir = Path(__file__).parent
+    logs_dir = script_dir / "logs"
+    logs_dir.mkdir(exist_ok=True)
+
     timestamp = int(time.time() * 1000)
-    log_path = f"session_{timestamp}.jsonl"
+    log_path = logs_dir / f"session_{timestamp}.jsonl"
     f = open(log_path, "w")
-    return log_path, f
+    return str(log_path), f
 
 
 def log_event(f, event_type: str, data: dict):

@@ -38,3 +38,7 @@ docs/sentinelle_cnc_blueprint.md
 docs/ARCHITECTURE.md
 docs/DESIGN.md
 tasks/
+
+# Logs de session
+sentinelle/logs/
+*.jsonl
