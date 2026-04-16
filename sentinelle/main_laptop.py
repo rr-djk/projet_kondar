@@ -14,7 +14,10 @@ import json
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
+
+VERSION = "1.0.0"
 
 
 def parse_args():
@@ -37,7 +40,7 @@ def parse_args():
     parser.add_argument(
         "--version", "-v",
         action="version",
-        version="SENTINELLE CNC 1.0.0"
+        version=f"SENTINELLE CNC {VERSION}"
     )
     return parser.parse_args()
 
@@ -80,7 +83,7 @@ def main():
     
     # Startup log
     log_event(log_file, "session_start", {
-        "version": "1.0.0",
+        "version": VERSION,
         "args": {
             "gcode_file": args.gcode_file,
             "camera": args.camera
@@ -128,8 +131,10 @@ def main():
         })
     except Exception as e:
         error_msg = str(e)
+        tb = traceback.format_exc()
         print(f"Erreur: {error_msg}", file=sys.stderr)
-        log_event(log_file, "error", {"message": error_msg})
+        print(tb, file=sys.stderr)
+        log_event(log_file, "error", {"message": error_msg, "traceback": tb})
         log_event(log_file, "session_end", {
             "reason": "exception",
             "duration_ms": int(time.time() * 1000) - session_start_ts

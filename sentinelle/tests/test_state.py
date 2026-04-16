@@ -109,3 +109,72 @@ def test_baseline_capturing_path_blocked_raises():
     app = _make(State.BASELINE_CAPTURING)
     with pytest.raises(InvalidTransition):
         app.transition(Event.PATH_BLOCKED)
+
+
+# ---------------------------------------------------------------------------
+# Nouveaux états Phase 3 : AUTO_OPTIMIZE et EMERGENCY_STOP (6 transitions)
+# ---------------------------------------------------------------------------
+
+
+def test_alert_warn_acoustic_warn_auto_optimize():
+    """ALERT_WARN + ACOUSTIC_WARN → AUTO_OPTIMIZE (double warn)."""
+    app = _make(State.ALERT_WARN)
+    app.acoustic_alert = True
+    app.transition(Event.ACOUSTIC_WARN)
+    assert app.state == State.AUTO_OPTIMIZE
+    assert app.acoustic_alert is True
+
+
+def test_alert_critical_path_blocked_emergency_stop():
+    """ALERT_CRITICAL + PATH_BLOCKED → EMERGENCY_STOP."""
+    app = _make(State.ALERT_CRITICAL)
+    app.acoustic_alert = True
+    app.transition(Event.PATH_BLOCKED)
+    assert app.state == State.EMERGENCY_STOP
+    assert app.path_blocked is True
+
+
+def test_confirming_acoustic_critical_emergency_stop():
+    """CONFIRMING + ACOUSTIC_CRITICAL → EMERGENCY_STOP."""
+    app = _make(State.CONFIRMING)
+    app.transition(Event.ACOUSTIC_CRITICAL)
+    assert app.state == State.EMERGENCY_STOP
+    assert app.acoustic_alert is True
+
+
+def test_auto_optimize_optimize_complete_running_normal():
+    """AUTO_OPTIMIZE + OPTIMIZE_COMPLETE → RUNNING_NORMAL."""
+    app = _make(State.AUTO_OPTIMIZE)
+    app.transition(Event.OPTIMIZE_COMPLETE)
+    assert app.state == State.RUNNING_NORMAL
+
+
+def test_auto_optimize_acoustic_critical_alert_critical():
+    """AUTO_OPTIMIZE + ACOUSTIC_CRITICAL → ALERT_CRITICAL."""
+    app = _make(State.AUTO_OPTIMIZE)
+    app.transition(Event.ACOUSTIC_CRITICAL)
+    assert app.state == State.ALERT_CRITICAL
+    assert app.acoustic_alert is True
+
+
+def test_emergency_stop_reset_idle():
+    """EMERGENCY_STOP + RESET → IDLE."""
+    app = _make(State.EMERGENCY_STOP)
+    app.path_blocked = True
+    app.acoustic_alert = True
+    app.transition(Event.RESET)
+    assert app.state == State.IDLE
+
+
+def test_emergency_stop_dismiss_raises():
+    """EMERGENCY_STOP + DISMISS → InvalidTransition (seul RESET valide)."""
+    app = _make(State.EMERGENCY_STOP)
+    with pytest.raises(InvalidTransition):
+        app.transition(Event.DISMISS)
+
+
+def test_auto_optimize_dismiss_raises():
+    """AUTO_OPTIMIZE + DISMISS → InvalidTransition."""
+    app = _make(State.AUTO_OPTIMIZE)
+    with pytest.raises(InvalidTransition):
+        app.transition(Event.DISMISS)

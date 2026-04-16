@@ -20,8 +20,8 @@ import pygame
 
 from sentinelle import config
 from sentinelle.ipc.ws_client import AcousticLink
-from sentinelle.protocol import AcousticEvent
-from sentinelle.state import AppState, Event, State
+from sentinelle.protocol import AcousticEvent, from_json
+from sentinelle.state import AppState, Event, InvalidTransition, State
 from sentinelle.visual.gcode_parser import Segment, parse_gcode
 from sentinelle.visual.obstacle import BoundingBox, detect_obstacle
 from sentinelle.visual.planner import find_path
@@ -78,6 +78,8 @@ class Simulator:
         self._camera_offline = False
         self._running = True
         self._cam_thread: threading.Thread | None = None
+        self._last_camera_frame = None
+        self._last_camera_frame_time = 0.0
 
         # G-code
         self._gcode_path = gcode_path
@@ -207,8 +209,6 @@ class Simulator:
         Returns:
             Liste des AcousticEvent reçus.
         """
-        from sentinelle.protocol import from_json
-
         events = []
         while True:
             msg = self._acoustic.get_event()
@@ -259,21 +259,21 @@ class Simulator:
         """Gère les clics souris sur boutons."""
         # Vérifier clic sur bouton BASELINE
         # Bouton à (20, 250) dans panel droit qui commence à x=768
-        baseline_rect = pygame.Rect(768 + 20, 250, 120, 40)
+        baseline_rect = pygame.Rect(VISUAL_PANEL_WIDTH + 20, 250, 120, 40)
         if baseline_rect.collidepoint(pos):
             self._start_baseline()
             return
 
         # Clic sur bouton MUTE
-        mute_rect = pygame.Rect(768 + 20, 300, 120, 40)
+        mute_rect = pygame.Rect(VISUAL_PANEL_WIDTH + 20, 300, 120, 40)
         if mute_rect.collidepoint(pos):
             self._toggle_mute()
 
     def _start_baseline(self) -> None:
         """Démarre la capture de baseline."""
-        # Vérifier état autorisé
-        if self._fsm.state not in (State.IDLE, State.RUNNING_NORMAL):
-            print("Cannot start baseline: invalid state", self._fsm.state)
+        # Vérifier état autorisé — baseline uniquement depuis IDLE (avant démarrage)
+        if self._fsm.state != State.IDLE:
+            print("Cannot start baseline: must be in IDLE state", self._fsm.state)
             return
 
         if self._baseline_capturing or self._baseline_ready:
@@ -310,17 +310,18 @@ class Simulator:
         if bbox is None:
             if self._fsm.path_blocked:
                 from_state = self._fsm.state
-                self._fsm.transition(Event.PATH_FOUND)
-                self._log_event("fsm_transition", {
-                    "from": from_state.value,
-                    "to": self._fsm.state.value,
-                    "event": "PATH_FOUND"
-                })
+                try:
+                    self._fsm.transition(Event.PATH_FOUND)
+                    self._log_event("fsm_transition", {
+                        "from": from_state.value,
+                        "to": self._fsm.state.value,
+                        "event": "PATH_FOUND"
+                    })
+                except InvalidTransition:
+                    pass  # EMERGENCY_STOP et similaires ne supportent pas PATH_FOUND
             self.segments = self.original_segments.copy()
             self.current_path = []
             return
-
-        obstacle_set = self._bbox_to_obstacle_set(bbox)
 
         # Log obstacle
         grid_cols, grid_rows = config.GRID_SIZE
@@ -342,22 +343,28 @@ class Simulator:
         if path is None:
             if not self._fsm.path_blocked:
                 from_state = self._fsm.state
-                self._fsm.transition(Event.PATH_BLOCKED)
-                self._log_event("fsm_transition", {
-                    "from": from_state.value,
-                    "to": self._fsm.state.value,
-                    "event": "PATH_BLOCKED"
-                })
+                try:
+                    self._fsm.transition(Event.PATH_BLOCKED)
+                    self._log_event("fsm_transition", {
+                        "from": from_state.value,
+                        "to": self._fsm.state.value,
+                        "event": "PATH_BLOCKED"
+                    })
+                except InvalidTransition:
+                    pass  # état ne supporte pas PATH_BLOCKED (ex: EMERGENCY_STOP)
             self.current_path = []
         else:
             if self._fsm.path_blocked:
                 from_state = self._fsm.state
-                self._fsm.transition(Event.PATH_FOUND)
-                self._log_event("fsm_transition", {
-                    "from": from_state.value,
-                    "to": self._fsm.state.value,
-                    "event": "PATH_FOUND"
-                })
+                try:
+                    self._fsm.transition(Event.PATH_FOUND)
+                    self._log_event("fsm_transition", {
+                        "from": from_state.value,
+                        "to": self._fsm.state.value,
+                        "event": "PATH_FOUND"
+                    })
+                except InvalidTransition:
+                    pass  # état ne supporte pas PATH_FOUND
             self.current_path = [(p.x, p.y) for p in path]
 
     def _update_fsm(self, events: list[AcousticEvent]) -> None:
@@ -401,7 +408,7 @@ class Simulator:
             for event in events:
                 if event.severity == "warn":
                     if self._fsm.state not in (
-                        State.ALERT_WARN, State.ALERT_CRITICAL,
+                        State.ALERT_CRITICAL,
                         State.PAUSED_ACOUSTIC, State.AUTO_OPTIMIZE
                     ):
                         try:
@@ -435,6 +442,11 @@ class Simulator:
             if events:
                 print(f"MUTE active: ignored {len(events)} acoustic events")
                 self._log_event("mute_ignored_events", {"count": len(events)})
+
+        # Safety net: _critical_start_ts doit toujours être défini en PAUSED_ACOUSTIC
+        # (garantit que ESPACE fonctionne quel que soit le chemin d'entrée)
+        if self._fsm.state == State.PAUSED_ACOUSTIC and self._critical_start_ts is None:
+            self._critical_start_ts = now
 
         # Gestion AUTO_OPTIMIZE: retour à RUNNING_NORMAL après 5s sans alerte
         if self._fsm.state == State.AUTO_OPTIMIZE:
@@ -503,19 +515,16 @@ class Simulator:
         quand la capture est plus lente que le rendu.
         """
         # Essayer de récupérer le frame le plus récent
-        fresh_frame = False
         try:
             while True:  # Vider la queue pour avoir le plus récent
                 self._last_camera_frame = self._frame_queue.get_nowait()
                 self._last_camera_frame_time = time.time()
-                fresh_frame = True
         except queue.Empty:
             pass
 
         # Afficher le dernier frame connu s'il est récent (< 2s)
-        if (hasattr(self, '_last_camera_frame') and
-            self._last_camera_frame is not None and
-            time.time() - getattr(self, '_last_camera_frame_time', 0) < 2.0):
+        if (self._last_camera_frame is not None and
+                time.time() - self._last_camera_frame_time < 2.0):
             try:
                 small = cv2.resize(self._last_camera_frame, (160, 120))
                 rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
@@ -523,7 +532,7 @@ class Simulator:
                 surface.blit(preview, (VISUAL_PANEL_WIDTH - 170, SCREEN_HEIGHT - 130))
                 return
             except Exception:
-                pass  # Fallback sur "No camera" si erreur de conversion
+                self._camera_offline = True  # Frame corrompu — marquer offline
 
         # Pas de frame valide disponible
         pygame.draw.rect(surface, (0x33, 0x33, 0x33),
@@ -538,7 +547,7 @@ class Simulator:
 
         self._draw_grid(surface)
 
-        if hasattr(self, '_gcode_error') and self._gcode_error:
+        if self._gcode_error:
             font = pygame.font.Font(None, 32)
             lines = self._gcode_error.split('\n')
             for i, line in enumerate(lines):

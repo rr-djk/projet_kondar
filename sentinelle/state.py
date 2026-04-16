@@ -114,3 +114,6 @@ class AppState:
             self.path_blocked = True
         elif event in (Event.PATH_FOUND, Event.RESUME, Event.DISMISS):
             self.path_blocked = False
+        elif event == Event.RESET:
+            self.acoustic_alert = False
+            self.path_blocked = False

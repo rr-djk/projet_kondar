@@ -59,17 +59,19 @@ def _detect_obstacle_hsv(frame: np.ndarray) -> BoundingBox | None:
     return BoundingBox(x=x, y=y, w=w, h=h)
 
 
+# Singleton ArUco — créé une seule fois à l'import (évite 60 allocations/s)
+_aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+_aruco_params = cv2.aruco.DetectorParameters()
+_aruco_detector = cv2.aruco.ArucoDetector(_aruco_dict, _aruco_params)
+
+
 def _detect_obstacle_aruco(frame: np.ndarray) -> BoundingBox | None:
     """Détection ArUco interne (fallback si HSV échoue).
 
     Utilise les marqueurs ArUco 4x4 pour la détection robuste en
     conditions de lumière variables.
     """
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-    parameters = cv2.aruco.DetectorParameters()
-    detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-
-    corners, ids, _ = detector.detectMarkers(frame)
+    corners, ids, _ = _aruco_detector.detectMarkers(frame)
 
     if ids is None or len(ids) == 0:
         return None
